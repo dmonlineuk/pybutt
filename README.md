@@ -161,6 +161,7 @@ python -m pybutt.cli import \
 --retries                 Number of retry attempts for transient errors (default: 3)
 --worker-count            Number of parallel import threads (default: 1)
 --batch-size              Rows per batch insert (default: 1000)
+--transaction-mode        Transaction scope: row, batch, rowgroup, file (default: file)
 --verbose, -v             Show verbose logging output
 ```
 
@@ -189,6 +190,43 @@ python -m pybutt.cli import \
   --worker-count 4 \
   --batch-size 5000 \
   --verbose
+```
+
+Import with row-level transactions (no locking, but risky - partial loads on error):
+```bash
+python -m pybutt.cli import \
+  --server sqlserver.example.com \
+  --database MyDatabase \
+  --table LargeTable \
+  --input-path ./imports/data \
+  --manifest-filename data_manifest.json \
+  --username dbuser \
+  --transaction-mode row
+```
+
+Import with batch transactions (balance between safety and locking):
+```bash
+python -m pybutt.cli import \
+  --server sqlserver.example.com \
+  --database MyDatabase \
+  --table Orders \
+  --input-path ./imports/orders \
+  --manifest-filename orders_manifest.json \
+  --username dbuser \
+  --transaction-mode batch \
+  --batch-size 5000
+```
+
+Import with row group transactions:
+```bash
+python -m pybutt.cli import \
+  --server sqlserver.example.com \
+  --database MyDatabase \
+  --table LargeTable \
+  --input-path ./imports/data \
+  --manifest-filename data_manifest.json \
+  --username dbuser \
+  --transaction-mode rowgroup
 ```
 
 ### Password Input
@@ -278,24 +316,70 @@ exporter.perform_work()
 
 #### Importing Data
 
+**Default (file-level transaction):**
 ```python
+from pybutt.core import TransactionMode
+
 importer = Importer(
     config=config,
     input_path=Path("./exports/customers"),
     manifest_filename="customers_manifest.json",
     worker_count=4,                          # Number of parallel threads
     batch_size=1000,                         # Rows per batch
+    transaction_mode=TransactionMode.FILE,   # Entire file in one transaction (default)
 )
 
 importer.perform_work()
 print("Import completed successfully!")
 ```
 
+**With row-level transactions (no locking):**
+```python
+importer = Importer(
+    config=config,
+    input_path=Path("./exports/customers"),
+    manifest_filename="customers_manifest.json",
+    worker_count=4,
+    batch_size=1000,
+    transaction_mode=TransactionMode.ROW,    # Each row commits individually
+)
+
+importer.perform_work()
+```
+
+**With batch-level transactions (balance safety and locking):**
+```python
+importer = Importer(
+    config=config,
+    input_path=Path("./exports/orders"),
+    manifest_filename="orders_manifest.json",
+    worker_count=4,
+    batch_size=5000,
+    transaction_mode=TransactionMode.BATCH,  # Each batch in its own transaction
+)
+
+importer.perform_work()
+```
+
+**With row group transactions:**
+```python
+importer = Importer(
+    config=config,
+    input_path=Path("./exports/data"),
+    manifest_filename="data_manifest.json",
+    worker_count=4,
+    batch_size=1000,
+    transaction_mode=TransactionMode.ROWGROUP,  # Each row group in its own transaction
+)
+
+importer.perform_work()
+```
+
 #### Complete Example
 
 ```python
 from pathlib import Path
-from pybutt.core import SqlConfig, Exporter, Importer
+from pybutt.core import SqlConfig, Exporter, Importer, TransactionMode
 
 # Configure connection
 config = SqlConfig(
@@ -334,6 +418,7 @@ importer = Importer(
     manifest_filename="dbo_LargeTable_manifest.json",
     worker_count=4,
     batch_size=5000,
+    transaction_mode=TransactionMode.BATCH,  # Batch-level transactions for balance
 )
 importer.perform_work()
 print("✓ Import complete")
@@ -359,6 +444,22 @@ When exporting, PyButt automatically creates a manifest JSON file listing all ge
 - **Import**: Use `--worker-count` up to your CPU core count and adjust `--batch-size` (higher values = fewer database round trips)
 - **Primary Key Partitioning**: Use `--pk-column` for deterministic partitioning when re-importing the same data
 - **Encryption**: Use `--no-encrypt` only in secure networks to reduce overhead
+
+## Transaction Modes for Import
+
+The `--transaction-mode` option controls how data is committed during import. Choose based on your safety vs. performance needs:
+
+| Mode | Behavior | Best For | Pros | Cons |
+|------|----------|----------|------|------|
+| **row** | Each row auto-commits immediately | Large tables, non-critical data | No locking, fastest | Partial loads on error, no rollback |
+| **batch** | Each batch of `batch_size` rows commits together | Balanced safety/performance | Fast, limited lock duration | Partial batch loads on error |
+| **rowgroup** | Each Parquet row group commits together | Precise granularity | Row group boundary safety | Longer locks than batch mode |
+| **file** | Entire file in one transaction (default) | Production, critical data | All-or-nothing safety, data integrity | Can hold locks longer on large files |
+
+**Choosing a mode:**
+- **Production/Critical Data**: Use `file` (default) for complete safety
+- **Large Tables with Lock Issues**: Try `batch` with appropriate batch size, or `rowgroup`
+- **Non-Critical/Recovery Scenarios**: Use `row` for maximum speed and no locking
 
 ## Troubleshooting
 

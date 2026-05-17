@@ -7,7 +7,7 @@ from typing import Optional
 
 import typer
 
-from pybutt.core import Exporter, Importer, SqlConfig
+from pybutt.core import Exporter, Importer, SqlConfig, TransactionMode
 
 app = typer.Typer(
     help="""PyButt CLI for exporting SQL Server tables to Parquet files and importing Parquet data back into SQL Server.
@@ -253,6 +253,11 @@ def import_data(
         "-v",
         help="Show verbose logging output.",
     ),
+    transaction_mode: TransactionMode = typer.Option(
+        TransactionMode.FILE,
+        "--transaction-mode",
+        help="Transaction scope: row (no transaction, auto-commit), batch (per batch), rowgroup (per row group), file (entire file, default).",
+    ),
 ) -> None:
     """Import Parquet files into a SQL Server table.
 
@@ -283,6 +288,7 @@ def import_data(
         manifest_filename=manifest_filename,
         worker_count=worker_count,
         batch_size=batch_size,
+        transaction_mode=transaction_mode,
     )
     importer.perform_work()
     typer.secho("Import completed successfully.", fg=typer.colors.GREEN)

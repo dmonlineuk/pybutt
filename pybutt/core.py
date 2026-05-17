@@ -7,12 +7,20 @@ import pyodbc
 import pyarrow.parquet as pq
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from enum import Enum
 import re
 import time
 import logging
 import threading
 
 logging.basicConfig(level=logging.INFO)
+
+class TransactionMode(str, Enum):
+    """Control how transactions are handled during import."""
+    ROW = "row"                      # Each row commits individually (no transaction)
+    BATCH = "batch"                  # Each batch of batch_size rows in its own transaction
+    ROWGROUP = "rowgroup"            # Each row group in the parquet file in its own transaction
+    FILE = "file"                    # Entire file in one transaction
 
 IDENTIFIER_REGEX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -76,9 +84,9 @@ class SqlServerIOBase:
         conn.execute('INSTALL odbc_scanner; LOAD odbc_scanner;')
         return conn
 
-    def connection_p(self):
+    def connection_p(self, autocommit=False):
         conn = pyodbc.connect(self.dsn)
-        conn.autocommit = False
+        conn.autocommit = autocommit
         return conn        
 
     def full_table_name(self):
@@ -298,6 +306,7 @@ class Importer(SqlServerIOBase):
         manifest_filename,
         worker_count=1,
         batch_size=1_000,
+        transaction_mode: TransactionMode = TransactionMode.FILE,
     ):
         super().__init__(config)
 
@@ -306,6 +315,7 @@ class Importer(SqlServerIOBase):
 
         self.worker_count = worker_count
         self.batch_size = batch_size
+        self.transaction_mode = TransactionMode(transaction_mode) if isinstance(transaction_mode, str) else transaction_mode
 
     def load_manifest(self):
         manifest_file = self.input_path / self.manifest_filename
@@ -365,11 +375,13 @@ class Importer(SqlServerIOBase):
             f"Thread={thread_id} "
             f"Importing file={filename} "
             f"table={self.schema}.{self.table} "
-            f"batch_size={self.batch_size}"
+            f"batch_size={self.batch_size} "
+            f"transaction_mode={self.transaction_mode.value}"
         )
 
         def _work():
-            with self.connection_p() as c:
+            # For ROW mode, use autocommit; for others, manual commit control
+            with self.connection_p(autocommit=(self.transaction_mode == TransactionMode.ROW)) as c:
                 try:
                     with c.cursor() as cur:
                         cur.fast_executemany = True
@@ -395,17 +407,29 @@ class Importer(SqlServerIOBase):
                                 cur.executemany(insert_sql, rows)
                                 total_rows += len(rows)
 
+                                # Commit after each batch if in BATCH mode
+                                if self.transaction_mode == TransactionMode.BATCH:
+                                    c.commit()
+
                             logging.info(
                                 f"{filename}: processed row group {rg_idx+1}/"
                                 f"{parquet_file.num_row_groups}"
                             )
+
+                            # Commit after each row group if in ROWGROUP mode
+                            if self.transaction_mode == TransactionMode.ROWGROUP:
+                                c.commit()
                                 
-                    c.commit()
+                    # Commit after entire file if in FILE mode
+                    if self.transaction_mode == TransactionMode.FILE:
+                        c.commit()
 
                     logging.info(f"Completed file={filename}, total rows: {total_rows}, in {time.time() - start:.2f}s")
 
                 except Exception as e:
-                    c.rollback()
+                    # Rollback only if we have transaction control (not ROW mode)
+                    if self.transaction_mode != TransactionMode.ROW:
+                        c.rollback()
                     logging.error(f"Failed importing {filename}: {self.safe_error_message(e)}")
                     raise
 
