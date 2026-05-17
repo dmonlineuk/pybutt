@@ -7,4 +7,4 @@ dependencies = ["typer"]
 where = ["."]
 
 [project.scripts]
-pybutt = "cli:app"
+pybutt = "pybutt.cli:app"
