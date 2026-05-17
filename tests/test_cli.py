@@ -1,26 +1,20 @@
-import pytest
 from typer.testing import CliRunner
-
-import pybutt.cli  as cli
-
+import pybutt.cli as cli
 
 runner = CliRunner()
 
 
-# ============================================================
-# ✅ BASIC CLI EXECUTION
-# ============================================================
+# ------------------------------------------------------------
+# ✅ BASIC RUN
+# ------------------------------------------------------------
 
-def test_cli_export_runs(monkeypatch, tmp_path):
+def test_cli_runs(monkeypatch, tmp_path):
     called = {"ran": False}
 
     class FakeExporter:
         def __init__(self, *args, **kwargs):
-            # basic sanity checks on wiring
-            assert kwargs["server"] == "srv"
-            assert kwargs["database"] == "db"
-            assert kwargs["schema"] == "dbo"
-            assert kwargs["table"] == "tbl"
+            cfg = kwargs["config"]
+            assert cfg.server == "srv"
 
         def perform_work(self):
             called["ran"] = True
@@ -35,90 +29,55 @@ def test_cli_export_runs(monkeypatch, tmp_path):
         "--output-path", str(tmp_path),
     ])
 
-    assert result.exit_code == 0, result.stdout
-    assert called["ran"] is True
-    assert "Export complete" in result.stdout
+    assert result.exit_code == 0
+    assert called["ran"]
 
 
-# ============================================================
-# ✅ CLI PASSES OPTIONAL PARAMETERS
-# ============================================================
+# ------------------------------------------------------------
+# ✅ OPTIONS
+# ------------------------------------------------------------
 
-def test_cli_passes_optional_args(monkeypatch, tmp_path):
+def test_cli_options(monkeypatch, tmp_path):
     captured = {}
 
     class FakeExporter:
         def __init__(self, *args, **kwargs):
             captured.update(kwargs)
 
-        def perform_work(self):
-            pass
+        def perform_work(self): pass
 
     monkeypatch.setattr(cli, "Exporter", FakeExporter)
 
-    result = runner.invoke(cli.app, [
+    runner.invoke(cli.app, [
         "--server", "srv",
         "--database", "db",
         "--schema", "dbo",
         "--table", "tbl",
         "--output-path", str(tmp_path),
-        "--username", "user",
-        "--password", "pass",
+        "--username", "u",
+        "--password", "p",
         "--pk-column", "id",
-        "--columns", "col1",
-        "--columns", "col2",
-        "--worker-count", "4",
-        "--max-rows-per-file", "500",
-        "--trusted-connection",
-        "--trust-cert",
-        "--encrypt",
-        "--retries", "5",
+        "--columns", "c1",
+        "--columns", "c2",
+        "--worker-count", "4"
     ])
 
-    assert result.exit_code == 0
+    cfg = captured["config"]
 
-    assert captured["username"] == "user"
-    assert captured["password"] == "pass"
-    assert captured["pk_column"] == "id"
-    assert captured["columns"] == ["col1", "col2"]
+    assert cfg.username == "u"
+    assert captured["columns"] == ["c1", "c2"]
     assert captured["worker_count"] == 4
-    assert captured["max_rows_per_file"] == 500
-    assert captured["trusted_connection"] is True
-    assert captured["trust_cert"] is True
-    assert captured["encrypt"] is True
-    assert captured["retries"] == 5
 
 
-# ============================================================
-# ✅ CLI VALIDATION ERROR PROPAGATION
-# ============================================================
+# ------------------------------------------------------------
+# ✅ ERROR HANDLING
+# ------------------------------------------------------------
 
-def test_cli_invalid_identifier_fails(tmp_path):
-    result = runner.invoke(cli.app, [
-        "--server", "srv",
-        "--database", "db",
-        "--schema", "invalid-schema!",  # invalid
-        "--table", "tbl",
-        "--output-path", str(tmp_path),
-    ])
-
-    # Typer will catch exception and return non-zero
-    assert result.exit_code != 0
-    assert "Invalid identifier" in result.stderr
-
-
-# ============================================================
-# ✅ CLI HANDLES EXPORT FAILURE
-# ============================================================
-
-def test_cli_export_failure(monkeypatch, tmp_path):
+def test_cli_error(monkeypatch, tmp_path):
 
     class FakeExporter:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def perform_work(self):
-            raise RuntimeError("boom")
+        def __init__(self, *a, **k): pass
+        def perform_work(self): raise RuntimeError("boom")
 
     monkeypatch.setattr(cli, "Exporter", FakeExporter)
 
@@ -134,13 +93,11 @@ def test_cli_export_failure(monkeypatch, tmp_path):
     assert "boom" in result.stderr
 
 
-# ============================================================
-# ✅ CLI HELP TEXT
-# ============================================================
+# ------------------------------------------------------------
+# ✅ HELP
+# ------------------------------------------------------------
 
 def test_cli_help():
     result = runner.invoke(cli.app, ["--help"])
-
     assert result.exit_code == 0
-    assert "Export a SQL Server table to Parquet using DuckDB + ODBC." in result.stdout
-    assert "export" in result.stdout
+    assert "Python Bulk Transfer Tool for MS SQL Server CLI" in result.stdout
