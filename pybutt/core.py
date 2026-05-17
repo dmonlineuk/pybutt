@@ -111,7 +111,7 @@ class Exporter(SqlServerIOBase):
         pk_column=None,
         columns=None,
         worker_count=1,
-        max_rows_per_file=1_000_000,
+        file_count=1,
     ):
         super().__init__(config)
 
@@ -121,14 +121,18 @@ class Exporter(SqlServerIOBase):
             if columns else "*"
         )
 
+        if file_count < 1:
+            raise ValueError("file_count must be at least 1")
+
         self.worker_count = worker_count
-        self.max_rows_per_file = max_rows_per_file
+        self.file_count = file_count
 
         self.output_path = Path(output_path)
         self.output_path.mkdir(parents=True, exist_ok=True)
 
         self.total_rows = 0
         self.partition_count = 0
+        self.chunk_size = 0
 
         self.partition_meta()
 
@@ -151,12 +155,14 @@ class Exporter(SqlServerIOBase):
         if self.total_rows == 0:
             raise RuntimeError("Table empty or not found")
 
-        self.partition_count = m.ceil(self.total_rows / self.max_rows_per_file)
+        self.partition_count = self.file_count
+        self.chunk_size = m.ceil(self.total_rows / self.partition_count)
 
         logging.info(
             f"Partitioning table={self.schema}.{self.table} "
             f"total_rows={self.total_rows} "
-            f"max_rows_per_file={self.max_rows_per_file}"
+            f"file_count={self.file_count} "
+            f"chunk_size={self.chunk_size}"
         )
 
         if self.pk_column:
@@ -164,15 +170,37 @@ class Exporter(SqlServerIOBase):
         else:
             logging.info(f"Partition strategy=CHECKSUM modulo={self.partition_count}")
 
+    def get_table_columns(self):
+        query = f"""
+            SELECT COLUMN_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = '{self.schema}'
+              AND TABLE_NAME = '{self.table}'
+            ORDER BY ORDINAL_POSITION
+        """
+
+        with self.connection_d() as c:
+            rows = c.execute(
+                f"FROM odbc_query('{self.dsn}', $$ {query} $$)"
+            ).fetchall()
+
+        return [row[0] for row in rows]
+
     def build_partition_query(self, n):
         if self.pk_column:
-            start = n * self.max_rows_per_file
-            end = (n + 1) * self.max_rows_per_file
+            start = n * self.chunk_size
+            end = (n + 1) * self.chunk_size
+
+            if self.columns == "*":
+                column_names = self.get_table_columns()
+                selected_columns = ", ".join(quote_identifier(c) for c in column_names)
+            else:
+                selected_columns = self.columns
 
             return f"""
-                SELECT {self.columns}
+                SELECT {selected_columns}
                 FROM (
-                    SELECT {self.columns},
+                    SELECT {selected_columns},
                            ROW_NUMBER() OVER (ORDER BY {quote_identifier(self.pk_column)}) AS rn
                     FROM {self.full_table_name()}
                 ) t
@@ -225,7 +253,7 @@ class Exporter(SqlServerIOBase):
             size_mb = 0
         logging.info(
             f"Completed file={filename} "
-            f"rows~{self.max_rows_per_file} "
+            f"rows~{self.chunk_size} "
             f"size={size_mb:.2f} MB "
             f"time={duration:.2f}s "
             f"Progress: {n+1}/{self.partition_count}"
