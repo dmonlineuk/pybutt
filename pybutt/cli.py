@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import getpass
 import logging
 from pathlib import Path
 from typing import Optional
@@ -42,8 +43,12 @@ def build_sql_config(
     retries: int,
 ) -> SqlConfig:
     if not trusted_connection:
-        if not username or not password:
-            raise typer.BadParameter("username and password are required unless --trusted-connection is used")
+        if not username:
+            raise typer.BadParameter("username is required unless --trusted-connection is used")
+        
+        # Prompt for password if not provided
+        if not password:
+            password = getpass.getpass("Enter your password: ")
 
     return SqlConfig(
         server=server,
