@@ -116,10 +116,7 @@ class Exporter(SqlServerIOBase):
         super().__init__(config)
 
         self.pk_column = validate_identifier(pk_column) if pk_column else None
-        self.columns = (
-            ", ".join(validate_identifier(c) for c in columns)
-            if columns else "*"
-        )
+        self.columns = [validate_identifier(c) for c in columns] if columns else None
 
         if file_count < 1:
             raise ValueError("file_count must be at least 1")
@@ -191,11 +188,11 @@ class Exporter(SqlServerIOBase):
             start = n * self.chunk_size
             end = (n + 1) * self.chunk_size
 
-            if self.columns == "*":
+            if self.columns is None:
                 column_names = self.get_table_columns()
                 selected_columns = ", ".join(quote_identifier(c) for c in column_names)
             else:
-                selected_columns = self.columns
+                selected_columns = ", ".join(quote_identifier(c) for c in self.columns)
 
             return f"""
                 SELECT {selected_columns}
@@ -207,8 +204,12 @@ class Exporter(SqlServerIOBase):
                 WHERE rn > {start} AND rn <= {end}
             """
         else:
+            selected_columns = (
+                ", ".join(quote_identifier(c) for c in self.columns)
+                if self.columns is not None else "*"
+            )
             return f"""
-                SELECT {self.columns}
+                SELECT {selected_columns}
                 FROM {self.full_table_name()}
                 WHERE ABS(CHECKSUM(*)) % {self.partition_count} = {n}
             """
