@@ -16,6 +16,8 @@
 
 Before installing PyButt, ensure your system has the required ODBC components:
 
+### Linux
+
 ```bash
 # Check for libodbc
 ldconfig -p | grep libodbc
@@ -29,6 +31,24 @@ odbcinst -q -d
 - `msodbcsql` version 18
 - `duckdb` (see https://duckdb.org/install/?platform=linux&environment=cli)
 
+### Windows
+
+Install these packages using winget, and ensure ExecutionPolicy to activate your virtual environment:
+
+```pwsh
+winget install -e --id Microsoft.msodbcsql.18
+winget install -e --id DuckDB.cli
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+# If you haven't already got `git` or `python`
+winget install -e --id Git.Git
+winget install -e --id Python.Python.3.14 --location C:\Python314
+```
+
+**Required packages:**
+- `msodbcsql` version 18
+- `duckdb` (see https://duckdb.org/install/?platform=windows&environment=cli)
+
 ## Installation
 
 ### Quick Start
@@ -36,7 +56,7 @@ odbcinst -q -d
 ```bash
 git clone https://github.com/dmonlineuk/pybutt && cd pybutt
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate  # On Windows: `. .venv\Scripts\activate`
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```

@@ -1,6 +1,6 @@
 [project]
 name = "pybutt"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = ["typer"]
 
 [tool.setuptools.packages.find]

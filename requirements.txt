@@ -1,8 +1,5 @@
-jupyterlab
 duckdb
-pathos
 pytest
 pyodbc
 pyarrow
-pandas
 typer
