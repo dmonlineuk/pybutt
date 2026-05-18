@@ -148,6 +148,13 @@ def export(
         help="Number of Parquet output files.",
         min=1,
     ),
+    rowgroup_size: int = typer.Option(
+        1_048_576,
+        "--rowgroup-size",
+        "-rs",
+        help="Number of rows per rowgroup in the Parquet files.",
+        min=1,
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -185,6 +192,7 @@ def export(
         columns=parse_columns(columns),
         worker_count=worker_count,
         file_count=file_count,
+        rowgroup_size=rowgroup_size,
     )
     exporter.perform_work()
     typer.secho("Export completed successfully.", fg=typer.colors.GREEN)

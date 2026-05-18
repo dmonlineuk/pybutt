@@ -108,6 +108,7 @@ pybutt export \
 --columns,              -c      Comma-separated list of columns to export (all by default)
 --worker-count,         -wc     Number of worker processes (default: 1)
 --file-count,           -fc     Number of output Parquet files (default: 1)
+--rowgroup-size,        -rs     Number of rows per rowgroup inside each Parquet file (default 1048576)
 --verbose,              -v      Show verbose logging output
 ```
 

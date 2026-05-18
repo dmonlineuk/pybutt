@@ -120,6 +120,7 @@ class Exporter(SqlServerIOBase):
         columns=None,
         worker_count=1,
         file_count=1,
+        rowgroup_size=1_048_576,
     ):
         super().__init__(config)
 
@@ -131,6 +132,7 @@ class Exporter(SqlServerIOBase):
 
         self.worker_count = worker_count
         self.file_count = file_count
+        self.rowgroup_size = rowgroup_size
 
         self.output_path = Path(output_path)
         self.output_path.mkdir(parents=True, exist_ok=True)
@@ -247,7 +249,7 @@ class Exporter(SqlServerIOBase):
                             FROM odbc_query('{self.dsn}', $$ {query} $$)
                         ) 
                         TO '{str(filepath).replace("\\", "/")}'
-                        (FORMAT parquet, COMPRESSION snappy)
+                        (FORMAT parquet, COMPRESSION snappy, ROW_GROUP_SIZE {self.rowgroup_size})
                     """)
                 except Exception as e:
                     raise RuntimeError(f"Failed exporting {filename}: {self.safe_error_message(e)}")
