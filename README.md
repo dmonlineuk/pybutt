@@ -1,15 +1,15 @@
 # PyButt
 
-**Python Bulk Transfer Tool** - A high-performance tool for exporting SQL Server tables to Parquet files and importing Parquet data back into SQL Server.
+**Python Bulk Transfer Tool** - A tool for exporting SQL Server tables to Parquet files and importing Parquet data back into SQL Server.
 
 ## Features
 
-- **Efficient SQL Server to Parquet Export**: Partition tables and export them as multiple Parquet files in parallel
+- **SQL Server to Parquet Export**: Partition tables and export them as multiple Parquet files in parallel
 - **Parquet to SQL Server Import**: Bulk import Parquet files into SQL Server with configurable batch sizing
 - **Flexible Authentication**: Supports both username/password and Windows integrated authentication
 - **Command-Line Interface**: Full-featured CLI with Typer for easy command execution
 - **Python API**: Use PyButt as a module in your Python projects for programmatic access
-- **Manifest-Based Import**: Track and validate exported files with automatic manifests
+- **Manifest-Based Import**: Track exported files with automatic manifests
 - **Performance Optimized**: Multi-process export and multi-threaded import for maximum throughput
 
 ## Prerequisites
@@ -72,23 +72,23 @@ python -m pybutt.cli export \
 **Export Options:**
 
 ```
---server, -s              SQL Server hostname or instance (required)
---database, -d            Target database (required)
---schema, -S              Table schema (default: dbo)
---table, -t               Table name (required)
---output-path, -o         Output directory for Parquet files (required)
---username, -u            SQL Server username
---password, -p            SQL Server password (prompted if not provided)
---trusted-connection      Use Windows integrated authentication
---driver                  ODBC driver name (default: ODBC Driver 18 for SQL Server)
---trust-cert              Trust the SQL Server TLS certificate
---encrypt/--no-encrypt    Enable/disable encrypted transport (default: enabled)
---retries                 Number of retry attempts for transient errors (default: 3)
---pk-column               Primary key column for deterministic partitioning
---columns                 Comma-separated list of columns to export (all by default)
---worker-count            Number of worker processes (default: 1)
---file-count              Number of output Parquet files (default: 1)
---verbose, -v             Show verbose logging output
+--server, -s                    SQL Server hostname or instance (required)
+--database, -d                  Target database (required)
+--schema, -S                    Table schema (default: dbo)
+--table, -t                     Table name (required)
+--output-path, -o               Output directory for Parquet files (required)
+--username, -u                  SQL Server username
+--password, -p                  SQL Server password (prompted if not provided)
+--trusted-connection, -T        Use Windows integrated authentication
+--driver, -D                    ODBC driver name (default: ODBC Driver 18 for SQL Server)
+--trust-cert, -tc               Trust the SQL Server TLS certificate
+--encrypt/--no-encrypt, -e/-ne  Enable/disable encrypted transport (default: enabled)
+--retries, -rc                  Number of retry attempts for transient errors (default: 3)
+--pk-column, -P                 Primary key column for deterministic partitioning
+--columns, -c                   Comma-separated list of columns to export (all by default)
+--worker-count, -wc             Number of worker processes (default: 1)
+--file-count, -fc               Number of output Parquet files (default: 1)
+--verbose, -v                   Show verbose logging output
 ```
 
 **Examples:**
@@ -146,28 +146,28 @@ python -m pybutt.cli import \
 **Import Options:**
 
 ```
---server, -s              SQL Server hostname or instance (required)
---database, -d            Target database (required)
---schema, -S              Table schema (default: dbo)
---table, -t               Table name (required)
---input-path, -i          Directory containing Parquet files (required)
---manifest-filename, -m   Manifest file name (required)
---username, -u            SQL Server username
---password, -p            SQL Server password (prompted if not provided)
---trusted-connection      Use Windows integrated authentication
---driver                  ODBC driver name (default: ODBC Driver 18 for SQL Server)
---trust-cert              Trust the SQL Server TLS certificate
---encrypt/--no-encrypt    Enable/disable encrypted transport (default: enabled)
---retries                 Number of retry attempts for transient errors (default: 3)
---worker-count            Number of parallel import threads (default: 1)
---batch-size              Rows per batch insert (default: 1000)
---transaction-mode        Transaction scope: row, batch, rowgroup, file (default: file)
---verbose, -v             Show verbose logging output
+--server, -s                    SQL Server hostname or instance (required)
+--database, -d                  Target database (required)
+--schema, -S                    Table schema (default: dbo)
+--table, -t                     Table name (required)
+--input-path, -i                Directory containing Parquet files (required)
+--manifest-filename, -m         Manifest file name (required)
+--username, -u                  SQL Server username
+--password, -p                  SQL Server password (prompted if not provided)
+--trusted-connection, -T        Use Windows integrated authentication
+--driver, -D                    ODBC driver name (default: ODBC Driver 18 for SQL Server)
+--trust-cert, -tc               Trust the SQL Server TLS certificate
+--encrypt/--no-encrypt, -e/-ne  Enable/disable encrypted transport (default: enabled)
+--retries, -rc                  Number of retry attempts for transient errors (default: 3)
+--worker-count, -wc             Number of parallel import threads (default: 1)
+--batch-size, -b                Rows per batch insert (default: 1000)
+--transaction-mode, -tm         Transaction scope: row, batch (default), rowgroup, file
+--verbose, -v                   Show verbose logging output
 ```
 
 **Examples:**
 
-Basic import:
+Basic import (uses recommended BATCH transaction mode by default):
 ```bash
 python -m pybutt.cli import \
   --server sqlserver.example.com \
@@ -178,7 +178,7 @@ python -m pybutt.cli import \
   --username dbuser
 ```
 
-High-throughput import with larger batches:
+High-throughput import with larger batches (BATCH mode recommended):
 ```bash
 python -m pybutt.cli import \
   --server sqlserver.example.com \
@@ -189,10 +189,35 @@ python -m pybutt.cli import \
   --username dbuser \
   --worker-count 4 \
   --batch-size 5000 \
+  --transaction-mode batch \
   --verbose
 ```
 
-Import with row-level transactions (no locking, but risky - partial loads on error):
+Import with row group transactions (for precise granularity):
+```bash
+python -m pybutt.cli import \
+  --server sqlserver.example.com \
+  --database MyDatabase \
+  --table LargeTable \
+  --input-path ./imports/data \
+  --manifest-filename data_manifest.json \
+  --username dbuser \
+  --transaction-mode rowgroup
+```
+
+Import with file-level transactions (all-or-nothing for critical data):
+```bash
+python -m pybutt.cli import \
+  --server sqlserver.example.com \
+  --database MyDatabase \
+  --table FinancialData \
+  --input-path ./imports/financials \
+  --manifest-filename financials_manifest.json \
+  --username dbuser \
+  --transaction-mode file
+```
+
+Import with row-level transactions (maximum speed, no safety - for testing only):
 ```bash
 python -m pybutt.cli import \
   --server sqlserver.example.com \
@@ -202,12 +227,7 @@ python -m pybutt.cli import \
   --manifest-filename data_manifest.json \
   --username dbuser \
   --transaction-mode row
-```
-
-Import with batch transactions (balance between safety and locking):
-```bash
-python -m pybutt.cli import \
-  --server sqlserver.example.com \
+``` \
   --database MyDatabase \
   --table Orders \
   --input-path ./imports/orders \
@@ -316,7 +336,7 @@ exporter.perform_work()
 
 #### Importing Data
 
-**Default (file-level transaction):**
+**Default (recommended batch-level transactions):**
 ```python
 from pybutt.core import TransactionMode
 
@@ -326,28 +346,14 @@ importer = Importer(
     manifest_filename="customers_manifest.json",
     worker_count=4,                          # Number of parallel threads
     batch_size=1000,                         # Rows per batch
-    transaction_mode=TransactionMode.FILE,   # Entire file in one transaction (default)
+    transaction_mode=TransactionMode.BATCH,  # Each batch in its own transaction (default, recommended)
 )
 
 importer.perform_work()
 print("Import completed successfully!")
 ```
 
-**With row-level transactions (no locking):**
-```python
-importer = Importer(
-    config=config,
-    input_path=Path("./exports/customers"),
-    manifest_filename="customers_manifest.json",
-    worker_count=4,
-    batch_size=1000,
-    transaction_mode=TransactionMode.ROW,    # Each row commits individually
-)
-
-importer.perform_work()
-```
-
-**With batch-level transactions (balance safety and locking):**
+**With row group transactions (precise granularity):**
 ```python
 importer = Importer(
     config=config,
@@ -355,13 +361,13 @@ importer = Importer(
     manifest_filename="orders_manifest.json",
     worker_count=4,
     batch_size=5000,
-    transaction_mode=TransactionMode.BATCH,  # Each batch in its own transaction
+    transaction_mode=TransactionMode.ROWGROUP,  # Each row group in its own transaction
 )
 
 importer.perform_work()
 ```
 
-**With row group transactions:**
+**With file-level transactions (all-or-nothing safety):**
 ```python
 importer = Importer(
     config=config,
@@ -369,7 +375,21 @@ importer = Importer(
     manifest_filename="data_manifest.json",
     worker_count=4,
     batch_size=1000,
-    transaction_mode=TransactionMode.ROWGROUP,  # Each row group in its own transaction
+    transaction_mode=TransactionMode.FILE,   # Entire file in one transaction
+)
+
+importer.perform_work()
+```
+
+**With row-level transactions (maximum speed, no safety):**
+```python
+importer = Importer(
+    config=config,
+    input_path=Path("./exports/customers"),
+    manifest_filename="customers_manifest.json",
+    worker_count=4,
+    batch_size=1000,
+    transaction_mode=TransactionMode.ROW,    # Each row commits individually (no retries, autocommit)
 )
 
 importer.perform_work()
@@ -447,19 +467,49 @@ When exporting, PyButt automatically creates a manifest JSON file listing all ge
 
 ## Transaction Modes for Import
 
-The `--transaction-mode` option controls how data is committed during import. Choose based on your safety vs. performance needs:
+The `--transaction-mode` option controls how data is committed during import and how retries are handled. Choose based on your safety, performance, and recovery needs:
 
-| Mode | Behavior | Best For | Pros | Cons |
-|------|----------|----------|------|------|
-| **row** | Each row auto-commits immediately | Large tables, non-critical data | No locking, fastest | Partial loads on error, no rollback |
-| **batch** | Each batch of `batch_size` rows commits together | Balanced safety/performance | Fast, limited lock duration | Partial batch loads on error |
-| **rowgroup** | Each Parquet row group commits together | Precise granularity | Row group boundary safety | Longer locks than batch mode |
-| **file** | Entire file in one transaction (default) | Production, critical data | All-or-nothing safety, data integrity | Can hold locks longer on large files |
+| Mode | Behavior | Retry Scope | Best For | Pros | Cons |
+|------|----------|-------------|----------|------|------|
+| **batch** | Each batch of `batch_size` rows commits together | Per-batch retry | **Recommended for most use cases** | Fast, limited lock duration, failed batches retry independently | Rare edge case: partial batch on non-retryable error |
+| **rowgroup** | Each Parquet row group commits together | Per-rowgroup retry | Precise granularity with safe retries | Row group boundary safety, independent rowgroup retries | Longer locks than batch mode, fewer retry opportunities |
+| **file** | Entire file in one transaction | Entire file retry | Production, critical data | All-or-nothing atomicity, complete data integrity | Can hold locks longer on large files, if failure occurs entire file retries |
+| **row** | Each row auto-commits immediately | No retries (unsafe with autocommit) | Large tables, non-critical data, testing | Maximum speed, zero locking | Partial loads on error, no rollback, autocommit prevents safe retries |
+
+**Retry Behavior:**
+- **batch/rowgroup modes**: When a batch or rowgroup fails, only that unit is rolled back and retried (up to `--retries` times). Already-committed units remain intact.
+- **file mode**: If any part of the file fails, the entire file operation is retried. Previously committed batches are preserved by the transaction.
+- **row mode**: No retries possible due to autocommit. Each row commits immediately, so failed rows cannot be retried without risking duplication.
+
+**Recommended Configuration:**
+```bash
+python -m pybutt.cli import \
+  --server YOUR_SERVER \
+  --database YOUR_DB \
+  --table YOUR_TABLE \
+  --input-path ./data \
+  --manifest-filename manifest.json \
+  --username your_user \
+  --transaction-mode batch \
+  --batch-size 5000 \
+  --worker-count 4
+```
 
 **Choosing a mode:**
-- **Production/Critical Data**: Use `file` (default) for complete safety
-- **Large Tables with Lock Issues**: Try `batch` with appropriate batch size, or `rowgroup`
-- **Non-Critical/Recovery Scenarios**: Use `row` for maximum speed and no locking
+- **Default (Recommended)**: Use `batch` (new default) — balances safety, performance, and lock duration
+- **Production/Critical Data with High Volume**: Use `rowgroup` for precise granularity and independent retries
+- **Safety-Critical (Small Files)**: Use `file` for complete all-or-nothing atomicity
+- **Performance-Only, Non-Critical**: Use `row` for maximum speed (no safety guarantees)
+
+**Retry Configuration:**
+Use `--retries` (default: 3) to control retry attempts. This applies at the transaction scope level:
+```bash
+# Retry individual batches up to 5 times before failing
+python -m pybutt.cli import \
+  ... \
+  --transaction-mode batch \
+  --retries 5
+```
 
 ## Troubleshooting
 
@@ -474,6 +524,11 @@ The `--transaction-mode` option controls how data is committed during import. Ch
 **Memory Issues:**
 - Reduce `--worker-count` or `--batch-size`
 - Process smaller tables first to verify setup
+
+**Frequent Batch/Rowgroup Failures:**
+- Increase `--retries` and `--batch-size` for more resilient imports
+- Check SQL Server logs for transient connection issues
+- Verify network stability if errors are intermittent
 
 ## License
 

@@ -306,7 +306,7 @@ class Importer(SqlServerIOBase):
         manifest_filename,
         worker_count=1,
         batch_size=1_000,
-        transaction_mode: TransactionMode = TransactionMode.FILE,
+        transaction_mode: TransactionMode = TransactionMode.BATCH,
     ):
         super().__init__(config)
 
@@ -379,62 +379,126 @@ class Importer(SqlServerIOBase):
             f"transaction_mode={self.transaction_mode.value}"
         )
 
-        def _work():
-            # For ROW mode, use autocommit; for others, manual commit control
-            with self.connection_p(autocommit=(self.transaction_mode == TransactionMode.ROW)) as c:
-                try:
-                    with c.cursor() as cur:
-                        cur.fast_executemany = True
-                        parquet_file = pq.ParquetFile(filepath)
-                        columns = parquet_file.schema.names
-                        table_columns = self.get_table_columns(cur)
-                        self.validate_schema(columns, table_columns, filename)
-                        column_list = ', '.join(quote_identifier(col) for col in columns)
-                        placeholders = ', '.join('?' for _ in columns)
+        try:
+            if self.transaction_mode == TransactionMode.FILE:
+                # For FILE mode, wrap entire operation in retry logic
+                def _file_operation():
+                    return self._import_file_impl(filepath, filename, start)
+                self.retry(_file_operation, context=f"Import file {filename}")
+            else:
+                # For BATCH, ROWGROUP, and ROW modes, retries happen at granular level
+                self._import_file_impl(filepath, filename, start)
+        except Exception as e:
+            logging.error(f"Failed importing {filename}: {self.safe_error_message(e)}")
+            raise
 
-                        insert_sql = f"""
-                            INSERT INTO {self.full_table_name()} ({column_list})
-                            VALUES ({placeholders})
-                        """
+        return True
 
-                        total_rows = 0
+    def _import_file_impl(self, filepath, filename, start):
+        """Implementation of file import with transaction management."""
+        # For ROW mode, use autocommit; for others, manual commit control
+        with self.connection_p(autocommit=(self.transaction_mode == TransactionMode.ROW)) as c:
+            with c.cursor() as cur:
+                cur.fast_executemany = True
+                parquet_file = pq.ParquetFile(filepath)
+                columns = parquet_file.schema.names
+                table_columns = self.get_table_columns(cur)
+                self.validate_schema(columns, table_columns, filename)
+                column_list = ', '.join(quote_identifier(col) for col in columns)
+                placeholders = ', '.join('?' for _ in columns)
 
-                        for rg_idx in range(parquet_file.num_row_groups):
-                            table = parquet_file.read_row_group(rg_idx)
+                insert_sql = f"""
+                    INSERT INTO {self.full_table_name()} ({column_list})
+                    VALUES ({placeholders})
+                """
 
-                            for batch in table.to_batches(max_chunksize=self.batch_size):
+                total_rows = 0
+
+                for rg_idx in range(parquet_file.num_row_groups):
+                    table = parquet_file.read_row_group(rg_idx)
+
+                    if self.transaction_mode == TransactionMode.ROWGROUP:
+                        # Wrap rowgroup processing in retry logic
+                        rows_in_rg = self._import_rowgroup_with_retry(
+                            c, cur, table, insert_sql, filename, rg_idx, parquet_file.num_row_groups
+                        )
+                        total_rows += rows_in_rg
+                    else:
+                        # Process batches within the rowgroup
+                        for batch in table.to_batches(max_chunksize=self.batch_size):
+                            if self.transaction_mode == TransactionMode.BATCH:
+                                # Wrap batch processing in retry logic
+                                rows_in_batch = self._import_batch_with_retry(
+                                    c, cur, batch, insert_sql, filename
+                                )
+                                total_rows += rows_in_batch
+                            else:
+                                # ROW or FILE mode: just process the batch
                                 rows = list(zip(*[col.to_pylist() for col in batch.columns]))
                                 cur.executemany(insert_sql, rows)
                                 total_rows += len(rows)
 
-                                # Commit after each batch if in BATCH mode
-                                if self.transaction_mode == TransactionMode.BATCH:
-                                    c.commit()
-
+                        if self.transaction_mode != TransactionMode.BATCH:
                             logging.info(
                                 f"{filename}: processed row group {rg_idx+1}/"
                                 f"{parquet_file.num_row_groups}"
                             )
 
-                            # Commit after each row group if in ROWGROUP mode
-                            if self.transaction_mode == TransactionMode.ROWGROUP:
-                                c.commit()
-                                
-                    # Commit after entire file if in FILE mode
-                    if self.transaction_mode == TransactionMode.FILE:
-                        c.commit()
+                # Commit after entire file if in FILE mode
+                if self.transaction_mode == TransactionMode.FILE:
+                    c.commit()
 
-                    logging.info(f"Completed file={filename}, total rows: {total_rows}, in {time.time() - start:.2f}s")
+                logging.info(f"Completed file={filename}, total rows: {total_rows}, in {time.time() - start:.2f}s")
 
-                except Exception as e:
-                    # Rollback only if we have transaction control (not ROW mode)
-                    if self.transaction_mode != TransactionMode.ROW:
-                        c.rollback()
-                    logging.error(f"Failed importing {filename}: {self.safe_error_message(e)}")
-                    raise
+    def _import_batch_with_retry(self, c, cur, batch, insert_sql, filename):
+        """Import a single batch with retry logic for BATCH mode."""
+        rows = list(zip(*[col.to_pylist() for col in batch.columns]))
 
-        self.retry(_work, context=f"Import file {filename}")
-        return True
+        for attempt in range(self.config.retries):
+            try:
+                cur.executemany(insert_sql, rows)
+                c.commit()
+                return len(rows)
+            except Exception as e:
+                safe_msg = self.safe_error_message(e)
+
+                if attempt < self.config.retries - 1:
+                    logging.warning(
+                        f"Batch retry {attempt+1}/{self.config.retries} failed in {filename}: {safe_msg}"
+                    )
+                    c.rollback()
+                    time.sleep(2 ** attempt)
+                else:
+                    raise RuntimeError(
+                        f"Batch import failed after {self.config.retries} retries: {safe_msg}"
+                    )
+
+    def _import_rowgroup_with_retry(self, c, cur, table, insert_sql, filename, rg_idx, total_rg):
+        """Import a single row group with retry logic for ROWGROUP mode."""
+        for attempt in range(self.config.retries):
+            try:
+                total_rows = 0
+                for batch in table.to_batches(max_chunksize=self.batch_size):
+                    rows = list(zip(*[col.to_pylist() for col in batch.columns]))
+                    cur.executemany(insert_sql, rows)
+                    total_rows += len(rows)
+
+                c.commit()
+                logging.info(f"{filename}: processed row group {rg_idx+1}/{total_rg}")
+                return total_rows
+            except Exception as e:
+                safe_msg = self.safe_error_message(e)
+
+                if attempt < self.config.retries - 1:
+                    logging.warning(
+                        f"Row group retry {attempt+1}/{self.config.retries} failed in {filename}: {safe_msg}"
+                    )
+                    c.rollback()
+                    time.sleep(2 ** attempt)
+                else:
+                    raise RuntimeError(
+                        f"Row group import failed after {self.config.retries} retries: {safe_msg}"
+                    )
 
     def perform_work(self):
         filenames = self.load_manifest()

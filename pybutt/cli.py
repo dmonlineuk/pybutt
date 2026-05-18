@@ -10,6 +10,7 @@ import typer
 from pybutt.core import Exporter, Importer, SqlConfig, TransactionMode
 
 app = typer.Typer(
+    context_settings={"help_option_names": ["-?", "--help"]},
     help="""PyButt CLI for exporting SQL Server tables to Parquet files and importing Parquet data back into SQL Server.
 
 Commands:
@@ -81,6 +82,7 @@ def export(
     trusted_connection: bool = typer.Option(
         False,
         "--trusted-connection",
+        "-T",
         help="Use integrated Windows authentication instead of username/password.",
     ),
     username: Optional[str] = typer.Option(
@@ -98,43 +100,51 @@ def export(
     driver: str = typer.Option(
         "ODBC Driver 18 for SQL Server",
         "--driver",
+        "-D",
         help="ODBC driver name.",
     ),
     trust_cert: bool = typer.Option(
         False,
         "--trust-cert",
+        "-tc",
         help="Trust the SQL Server TLS certificate.",
     ),
     encrypt: bool = typer.Option(
         True,
         "--encrypt/--no-encrypt",
+        "-e/-ne",
         help="Enable or disable SQL Server encrypted transport.",
     ),
     retries: int = typer.Option(
         3,
         "--retries",
+        "-rc",
         help="Number of retry attempts for transient SQL errors.",
         min=1,
     ),
     pk_column: Optional[str] = typer.Option(
         None,
         "--pk-column",
+        "-P",
         help="Primary key column for deterministic partitioning.",
     ),
     columns: Optional[str] = typer.Option(
         None,
         "--columns",
+        "-c",
         help="Comma-separated list of columns to export. Defaults to all columns.",
     ),
     worker_count: int = typer.Option(
         1,
         "--worker-count",
+        "-wc",
         help="Number of worker processes used for export.",
         min=1,
     ),
     file_count: int = typer.Option(
         1,
         "--file-count",
+        "-fc",
         help="Number of Parquet output files.",
         min=1,
     ),
@@ -200,6 +210,7 @@ def import_data(
     trusted_connection: bool = typer.Option(
         False,
         "--trusted-connection",
+        "-T",
         help="Use integrated Windows authentication instead of username/password.",
     ),
     username: Optional[str] = typer.Option(
@@ -217,33 +228,39 @@ def import_data(
     driver: str = typer.Option(
         "ODBC Driver 18 for SQL Server",
         "--driver",
+        "-D",
         help="ODBC driver name.",
     ),
     trust_cert: bool = typer.Option(
         False,
         "--trust-cert",
+        "-tc",
         help="Trust the SQL Server TLS certificate.",
     ),
     encrypt: bool = typer.Option(
         True,
         "--encrypt/--no-encrypt",
+        "-e/-ne",
         help="Enable or disable SQL Server encrypted transport.",
     ),
     retries: int = typer.Option(
         3,
         "--retries",
+        "-rc",
         help="Number of retry attempts for transient SQL errors.",
         min=1,
     ),
     worker_count: int = typer.Option(
         1,
         "--worker-count",
+        "-wc",
         help="Number of parallel import threads.",
         min=1,
     ),
     batch_size: int = typer.Option(
         1000,
         "--batch-size",
+        "-b",
         help="Number of rows to insert per batch.",
         min=1,
     ),
@@ -254,9 +271,10 @@ def import_data(
         help="Show verbose logging output.",
     ),
     transaction_mode: TransactionMode = typer.Option(
-        TransactionMode.FILE,
+        TransactionMode.BATCH,
         "--transaction-mode",
-        help="Transaction scope: row (no transaction, auto-commit), batch (per batch), rowgroup (per row group), file (entire file, default).",
+        "-tm",
+        help="Transaction scope: row (no transaction, auto-commit), batch (per batch, recommended), rowgroup (per row group), file (entire file).",
     ),
 ) -> None:
     """Import Parquet files into a SQL Server table.

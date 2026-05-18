@@ -4,6 +4,7 @@ import pytest
 from typer.testing import CliRunner
 
 from pybutt import cli
+from pybutt.core import TransactionMode
 
 runner = CliRunner()
 
@@ -27,12 +28,21 @@ class DummyExporter:
 class DummyImporter:
     last_instance = None
 
-    def __init__(self, config, input_path, manifest_filename, worker_count=1, batch_size=1000):
+    def __init__(
+        self,
+        config,
+        input_path,
+        manifest_filename,
+        worker_count=1,
+        batch_size=1000,
+        transaction_mode=None,
+    ):
         self.config = config
         self.input_path = Path(input_path)
         self.manifest_filename = manifest_filename
         self.worker_count = worker_count
         self.batch_size = batch_size
+        self.transaction_mode = transaction_mode
         DummyImporter.last_instance = self
 
     def perform_work(self):
@@ -155,7 +165,7 @@ def test_import_command_parses_options(monkeypatch, tmp_path):
     assert importer.batch_size == 2500
 
 
-def test_export_command_requires_password_without_trusted_connection():
+def test_export_command_requires_username_without_trusted_connection():
     result = runner.invoke(
         cli.app,
         [
@@ -170,16 +180,16 @@ def test_export_command_requires_password_without_trusted_connection():
             "MyTable",
             "--output-path",
             "out",
-            "--username",
+            "--password",
             "user",
         ],
     )
 
     assert result.exit_code != 0
-    assert "username and password are required" in result.output
+    assert "username is required" in result.output
 
 
-def test_import_command_requires_password_without_trusted_connection(tmp_path):
+def test_import_command_requires_username_without_trusted_connection(tmp_path):
     input_dir = tmp_path / "input"
     input_dir.mkdir()
     result = runner.invoke(
@@ -198,10 +208,182 @@ def test_import_command_requires_password_without_trusted_connection(tmp_path):
             str(input_dir),
             "--manifest-filename",
             "manifest.json",
-            "--username",
+            "--password",
             "user",
         ],
     )
 
     assert result.exit_code != 0
-    assert "username and password are required" in result.output
+    assert "username is required" in result.output
+
+
+class TestTransactionModeCliParameter:
+    """Test transaction mode CLI parameter handling."""
+
+    def test_import_command_default_transaction_mode_is_batch(
+        self, monkeypatch, tmp_path
+    ):
+        """Test that default transaction mode is BATCH."""
+        monkeypatch.setattr(cli, "Importer", DummyImporter)
+
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "import",
+                "--server",
+                "localhost",
+                "--database",
+                "TestDb",
+                "--table",
+                "MyTable",
+                "--input-path",
+                str(input_dir),
+                "--manifest-filename",
+                "manifest.json",
+                "--trusted-connection",
+            ],
+        )
+
+        assert result.exit_code == 0
+        importer = DummyImporter.last_instance
+        assert importer is not None
+        assert importer.transaction_mode == TransactionMode.BATCH
+
+    def test_import_command_accepts_batch_mode(self, monkeypatch, tmp_path):
+        """Test that BATCH transaction mode is accepted via CLI."""
+        monkeypatch.setattr(cli, "Importer", DummyImporter)
+
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "import",
+                "--server",
+                "localhost",
+                "--database",
+                "TestDb",
+                "--table",
+                "MyTable",
+                "--input-path",
+                str(input_dir),
+                "--manifest-filename",
+                "manifest.json",
+                "--trusted-connection",
+                "--transaction-mode",
+                "batch",
+            ],
+        )
+
+        assert result.exit_code == 0
+        importer = DummyImporter.last_instance
+        assert importer is not None
+        assert importer.transaction_mode == TransactionMode.BATCH
+
+    def test_import_command_accepts_rowgroup_mode(self, monkeypatch, tmp_path):
+        """Test that ROWGROUP transaction mode is accepted via CLI."""
+        monkeypatch.setattr(cli, "Importer", DummyImporter)
+
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "import",
+                "--server",
+                "localhost",
+                "--database",
+                "TestDb",
+                "--table",
+                "MyTable",
+                "--input-path",
+                str(input_dir),
+                "--manifest-filename",
+                "manifest.json",
+                "--trusted-connection",
+                "--transaction-mode",
+                "rowgroup",
+            ],
+        )
+
+        assert result.exit_code == 0
+        importer = DummyImporter.last_instance
+        assert importer is not None
+        assert importer.transaction_mode == TransactionMode.ROWGROUP
+
+    def test_import_command_accepts_file_mode(self, monkeypatch, tmp_path):
+        """Test that FILE transaction mode is accepted via CLI."""
+        monkeypatch.setattr(cli, "Importer", DummyImporter)
+
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "import",
+                "--server",
+                "localhost",
+                "--database",
+                "TestDb",
+                "--table",
+                "MyTable",
+                "--input-path",
+                str(input_dir),
+                "--manifest-filename",
+                "manifest.json",
+                "--trusted-connection",
+                "--transaction-mode",
+                "file",
+            ],
+        )
+
+        assert result.exit_code == 0
+        importer = DummyImporter.last_instance
+        assert importer is not None
+        assert importer.transaction_mode == TransactionMode.FILE
+
+    def test_import_command_accepts_row_mode(self, monkeypatch, tmp_path):
+        """Test that ROW transaction mode is accepted via CLI."""
+        monkeypatch.setattr(cli, "Importer", DummyImporter)
+
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+
+        result = runner.invoke(
+            cli.app,
+            [
+                "import",
+                "--server",
+                "localhost",
+                "--database",
+                "TestDb",
+                "--table",
+                "MyTable",
+                "--input-path",
+                str(input_dir),
+                "--manifest-filename",
+                "manifest.json",
+                "--trusted-connection",
+                "--transaction-mode",
+                "row",
+            ],
+        )
+
+        assert result.exit_code == 0
+        importer = DummyImporter.last_instance
+        assert importer is not None
+        assert importer.transaction_mode == TransactionMode.ROW
+
+    def test_import_help_displays_transaction_mode_option(self):
+        """Test that --transaction-mode option appears in help."""
+        result = runner.invoke(cli.app, ["import", "--help"])
+        assert result.exit_code == 0
+        assert "transaction" in result.output.lower()
+        assert "batch" in result.output.lower()
+        assert "[default: batch]" in result.output.lower()
