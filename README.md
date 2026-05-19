@@ -214,7 +214,7 @@ pybutt import \
   --verbose
 ```
 
-Import with row group transactions (for precise granularity):
+Import with row group transactions (for rowgroup granularity):
 ```bash
 pybutt import \
   --server sqlserver.example.com \
@@ -248,14 +248,6 @@ pybutt import \
   --manifest-filename data_manifest.json \
   --username dbuser \
   --transaction-mode row
-``` \
-  --database MyDatabase \
-  --table Orders \
-  --input-path ./imports/orders \
-  --manifest-filename orders_manifest.json \
-  --username dbuser \
-  --transaction-mode batch \
-  --batch-size 5000
 ```
 
 Import with row group transactions:
@@ -374,7 +366,7 @@ importer.perform_work()
 print("Import completed successfully!")
 ```
 
-**With row group transactions (precise granularity):**
+**With row group transactions (rowgroup granularity):**
 ```python
 importer = Importer(
     config=config,
