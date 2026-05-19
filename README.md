@@ -238,7 +238,7 @@ pybutt import \
   --transaction-mode file
 ```
 
-Import with row-level transactions (maximum speed, no safety - for testing only):
+Import with row-level transactions (minimum speed, no safety - for testing only):
 ```bash
 pybutt import \
   --server sqlserver.example.com \
@@ -394,7 +394,7 @@ importer = Importer(
 importer.perform_work()
 ```
 
-**With row-level transactions (maximum speed, no safety):**
+**With row-level transactions (minimum speed, no safety - for testing only):**
 ```python
 importer = Importer(
     config=config,
