@@ -1,8 +1,4 @@
-black
-duckdb
-isort
-pyarrow
-pyodbc
-pytest
-ruff
 typer
+pyodbc
+pyarrow
+duckdb

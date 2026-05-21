@@ -1,10 +1,54 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "pybutt"
 version = "0.9.3"
-dependencies = ["typer"]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "typer",
+    "pyodbc",
+    "pyarrow",
+    "duckdb",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "ruff",
+    "isort",
+    "pytest",
+]
+
+[project.scripts]
+pybutt = "pybutt.cli:app"
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+skip-string-normalization = false
+
+[tool.isort]
+profile = "black"
+line_length = 88
+multi_line_output = 3
+include_trailing_comma = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
 
 [tool.setuptools.packages.find]
 where = ["."]
 
-[project.scripts]
-pybutt = "pybutt.cli:app"

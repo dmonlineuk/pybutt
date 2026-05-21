@@ -53,12 +53,20 @@ winget install -e --id Python.Python.3.14 --location C:\Python314
 
 ### Quick Start
 
+PyButt uses `pyproject.toml` as the source of truth for runtime dependencies and optional development tooling.
+
 ```bash
 git clone https://github.com/dmonlineuk/pybutt && cd pybutt
 python -m venv .venv
 source .venv/bin/activate  # On Windows: `. .venv\Scripts\activate`
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+pip install -e .
+```
+
+If you want the full developer environment with formatting, linting, and tests:
+
+```bash
+pip install -e .[dev]
 ```
 
 ### Install as a Package
@@ -542,6 +550,16 @@ pybutt import \
 - Increase `--retries` and `--batch-size` for more resilient imports
 - Check SQL Server logs for transient connection issues
 - Verify network stability if errors are intermittent
+
+## Contributions
+
+When coding, please consider the following:
+
+- Use the developer environment: `pip install -e .[dev]`
+- Write tests for your changes and features that will pass when run: `pytest`
+- Run isort: `isort .`
+- Run black: `black .`
+- Run ruff: `ruff check .`
 
 ## License
 
