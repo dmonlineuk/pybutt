@@ -214,10 +214,8 @@ def export(
 
 
 @app.command(
-    "import", help=(
-        "Import Parquet files into a SQL Server table using a "
-        "manifest file."
-    )
+    "import",
+    help=("Import Parquet files into a SQL Server table using a manifest file."),
 )
 def import_data(
     server: str = typer.Option(

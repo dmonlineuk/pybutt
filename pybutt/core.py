@@ -478,7 +478,7 @@ class Importer(SqlServerIOBase):
                                 rows = list(
                                     zip(
                                         *[col.to_pylist() for col in batch.columns],
-                                        strict=True
+                                        strict=True,
                                     )
                                 )
                                 cur.executemany(insert_sql, rows)
@@ -533,8 +533,7 @@ class Importer(SqlServerIOBase):
                 total_rows = 0
                 for batch in table.to_batches(max_chunksize=self.batch_size):
                     rows = list(
-                        zip(*[col.to_pylist() for col in batch.columns],
-                            strict=True)
+                        zip(*[col.to_pylist() for col in batch.columns], strict=True)
                     )
                     cur.executemany(insert_sql, rows)
                     total_rows += len(rows)
