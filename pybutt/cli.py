@@ -77,15 +77,19 @@ def build_sql_config(
     ),
 )
 def export(
-    server: str = typer.Option(
+    server: str = typer.Option(  # noqa: B008
         ..., "--server", "-s", help="SQL Server hostname or instance."
     ),
-    database: str = typer.Option(
+    database: str = typer.Option(  # noqa: B008
         ..., "--database", "-d", help="Target SQL Server database."
     ),
-    schema: str = typer.Option("dbo", "--schema", "-S", help="Target table schema."),
-    table: str = typer.Option(..., "--table", "-t", help="Target table name."),
-    output_path: Path = typer.Option(
+    schema: str = typer.Option(  # noqa: B008
+        "dbo", "--schema", "-S", help="Target table schema."
+    ),
+    table: str = typer.Option(  # noqa: B008
+        ..., "--table", "-t", help="Target table name."
+    ),
+    output_path: Path = typer.Option(  # noqa: B008
         ...,
         "--output-path",
         "-o",
@@ -94,83 +98,83 @@ def export(
         dir_okay=True,
         writable=True,
     ),
-    trusted_connection: bool = typer.Option(
+    trusted_connection: bool = typer.Option(  # noqa: B008
         False,
         "--trusted-connection",
         "-T",
         help="Use integrated Windows authentication instead of username/password.",
     ),
-    username: str | None = typer.Option(
+    username: str | None = typer.Option(  # noqa: B008
         None,
         "--username",
         "-u",
         help="SQL Server username when not using trusted connection.",
     ),
-    password: str | None = typer.Option(
+    password: str | None = typer.Option(  # noqa: B008
         None,
         "--password",
         "-p",
         help="SQL Server password when not using trusted connection.",
     ),
-    driver: str = typer.Option(
+    driver: str = typer.Option(  # noqa: B008
         "ODBC Driver 18 for SQL Server",
         "--driver",
         "-D",
         help="ODBC driver name.",
     ),
-    trust_cert: bool = typer.Option(
+    trust_cert: bool = typer.Option(  # noqa: B008
         False,
         "--trust-cert",
         "-tc",
         help="Trust the SQL Server TLS certificate.",
     ),
-    encrypt: bool = typer.Option(
+    encrypt: bool = typer.Option(  # noqa: B008
         True,
         "--encrypt/--no-encrypt",
         "-e/-ne",
         help="Enable or disable SQL Server encrypted transport.",
     ),
-    retries: int = typer.Option(
+    retries: int = typer.Option(  # noqa: B008
         3,
         "--retries",
         "-rc",
         help="Number of retry attempts for transient SQL errors.",
         min=1,
     ),
-    pk_column: str | None = typer.Option(
+    pk_column: str | None = typer.Option(  # noqa: B008
         None,
         "--pk-column",
         "-P",
         help="Primary key column for deterministic partitioning.",
     ),
-    columns: str | None = typer.Option(
+    columns: str | None = typer.Option(  # noqa: B008
         None,
         "--columns",
         "-c",
         help="Comma-separated list of columns to export. Defaults to all columns.",
     ),
-    worker_count: int = typer.Option(
+    worker_count: int = typer.Option(  # noqa: B008
         1,
         "--worker-count",
         "-wc",
         help="Number of worker processes used for export.",
         min=1,
     ),
-    file_count: int = typer.Option(
+    file_count: int = typer.Option(  # noqa: B008
         1,
         "--file-count",
         "-fc",
         help="Number of Parquet output files.",
         min=1,
     ),
-    rowgroup_size: int = typer.Option(
+    rowgroup_size: int = typer.Option(  # noqa: B008
         1_048_576,
         "--rowgroup-size",
         "-rs",
         help="Number of rows per rowgroup in the Parquet files.",
         min=1,
     ),
-    verbose: bool = typer.Option(
+    verbose: bool = typer.Option(  # noqa: B008
         False,
         "--verbose",
         "-v",
@@ -218,15 +222,19 @@ def export(
     help=("Import Parquet files into a SQL Server table using a manifest file."),
 )
 def import_data(
-    server: str = typer.Option(
+    server: str = typer.Option(  # noqa: B008
         ..., "--server", "-s", help="SQL Server hostname or instance."
     ),
-    database: str = typer.Option(
+    database: str = typer.Option(  # noqa: B008
         ..., "--database", "-d", help="Target SQL Server database."
     ),
-    schema: str = typer.Option("dbo", "--schema", "-S", help="Target table schema."),
-    table: str = typer.Option(..., "--table", "-t", help="Target table name."),
-    input_path: Path = typer.Option(
+    schema: str = typer.Option(  # noqa: B008
+        "dbo", "--schema", "-S", help="Target table schema."
+    ),
+    table: str = typer.Option(  # noqa: B008
+        ..., "--table", "-t", help="Target table name."
+    ),
+    input_path: Path = typer.Option(  # noqa: B008
         ...,
         "--input-path",
         "-i",
@@ -235,76 +243,76 @@ def import_data(
         file_okay=False,
         dir_okay=True,
     ),
-    manifest_filename: str = typer.Option(
+    manifest_filename: str = typer.Option(  # noqa: B008
         ...,
         "--manifest-filename",
         "-m",
         help="Manifest filename containing exported parquet file names.",
     ),
-    trusted_connection: bool = typer.Option(
+    trusted_connection: bool = typer.Option(  # noqa: B008
         False,
         "--trusted-connection",
         "-T",
         help="Use integrated Windows authentication instead of username/password.",
     ),
-    username: str | None = typer.Option(
+    username: str | None = typer.Option(  # noqa: B008
         None,
         "--username",
         "-u",
         help="SQL Server username when not using trusted connection.",
     ),
-    password: str | None = typer.Option(
+    password: str | None = typer.Option(  # noqa: B008
         None,
         "--password",
         "-p",
         help="SQL Server password when not using trusted connection.",
     ),
-    driver: str = typer.Option(
+    driver: str = typer.Option(  # noqa: B008
         "ODBC Driver 18 for SQL Server",
         "--driver",
         "-D",
         help="ODBC driver name.",
     ),
-    trust_cert: bool = typer.Option(
+    trust_cert: bool = typer.Option(  # noqa: B008
         False,
         "--trust-cert",
         "-tc",
         help="Trust the SQL Server TLS certificate.",
     ),
-    encrypt: bool = typer.Option(
+    encrypt: bool = typer.Option(  # noqa: B008
         True,
         "--encrypt/--no-encrypt",
         "-e/-ne",
         help="Enable or disable SQL Server encrypted transport.",
     ),
-    retries: int = typer.Option(
+    retries: int = typer.Option(  # noqa: B008
         3,
         "--retries",
         "-rc",
         help="Number of retry attempts for transient SQL errors.",
         min=1,
     ),
-    worker_count: int = typer.Option(
+    worker_count: int = typer.Option(  # noqa: B008
         1,
         "--worker-count",
         "-wc",
         help="Number of parallel import threads.",
         min=1,
     ),
-    batch_size: int = typer.Option(
+    batch_size: int = typer.Option(  # noqa: B008
         1000,
         "--batch-size",
         "-b",
         help="Number of rows to insert per batch.",
         min=1,
     ),
-    verbose: bool = typer.Option(
+    verbose: bool = typer.Option(  # noqa: B008
         False,
         "--verbose",
         "-v",
         help="Show verbose logging output.",
     ),
-    transaction_mode: TransactionMode = typer.Option(
+    transaction_mode: TransactionMode = typer.Option(  # noqa: B008
         TransactionMode.BATCH,
         "--transaction-mode",
         "-tm",
