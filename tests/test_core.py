@@ -2,7 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from pybutt.core import Exporter, Importer, SqlConfig, SqlServerIOBase, validate_identifier, quote_identifier
+from pybutt.core import (
+    Exporter,
+    Importer,
+    SqlConfig,
+    SqlServerIOBase,
+    quote_identifier,
+    validate_identifier,
+)
 
 
 def test_validate_identifier_valid():
@@ -82,7 +89,9 @@ def test_exporter_build_partition_query_without_pk(monkeypatch):
     )
 
     monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
-    exporter = Exporter(config=config, output_path=Path("./out"), worker_count=1, file_count=4)
+    exporter = Exporter(
+        config=config, output_path=Path("./out"), worker_count=1, file_count=4
+    )
     exporter.partition_count = 4
     exporter.chunk_size = 25
     query = exporter.build_partition_query(2)

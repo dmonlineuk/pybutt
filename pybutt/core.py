@@ -1,36 +1,43 @@
-import duckdb as d
-import math as m
 import json as j
-from pathlib import Path
-from multiprocessing import get_context
-import pyodbc
-import pyarrow.parquet as pq
+import logging
+import math as m
+import re
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
-import re
-import time
-import logging
-import threading
+from multiprocessing import get_context
+from pathlib import Path
+
+import duckdb as d
+import pyarrow.parquet as pq
+import pyodbc
 
 logging.basicConfig(level=logging.INFO)
 
+
 class TransactionMode(str, Enum):
     """Control how transactions are handled during import."""
-    ROW = "row"                      # Each row commits individually (no transaction)
-    BATCH = "batch"                  # Each batch of batch_size rows in its own transaction
-    ROWGROUP = "rowgroup"            # Each row group in the parquet file in its own transaction
-    FILE = "file"                    # Entire file in one transaction
+
+    ROW = "row"  # Each row commits individually (no transaction)
+    BATCH = "batch"  # Each batch of batch_size rows in its own transaction
+    ROWGROUP = "rowgroup"  # Each row group in the parquet file in its own transaction
+    FILE = "file"  # Entire file in one transaction
+
 
 IDENTIFIER_REGEX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 
 def validate_identifier(name: str) -> str:
     if not IDENTIFIER_REGEX.match(name):
         raise ValueError(f"Invalid identifier: {name}")
     return name
-    
+
+
 def quote_identifier(name: str) -> str:
     return f"[{name.replace(']', ']]')}]"
+
 
 @dataclass
 class SqlConfig:
@@ -40,11 +47,12 @@ class SqlConfig:
     table: str
     username: str | None = None
     password: str | None = None
-    driver: str = 'ODBC Driver 18 for SQL Server'
+    driver: str = "ODBC Driver 18 for SQL Server"
     trusted_connection: bool = False
     trust_cert: bool = False
     encrypt: bool = True
     retries: int = 3
+
 
 class SqlServerIOBase:
     def __init__(self, config: SqlConfig):
@@ -68,7 +76,9 @@ class SqlServerIOBase:
             parts.append("Trusted_Connection=Yes")
         else:
             if not cfg.username or not cfg.password:
-                raise ValueError("Username/password required when not using trusted connection")
+                raise ValueError(
+                    "Username/password required when not using trusted connection"
+                )
             parts.append(f"Uid={cfg.username}")
             parts.append(f"Pwd={cfg.password}")
 
@@ -81,13 +91,13 @@ class SqlServerIOBase:
 
     def connection_d(self):
         conn = d.connect()
-        conn.execute('INSTALL odbc_scanner; LOAD odbc_scanner;')
+        conn.execute("INSTALL odbc_scanner; LOAD odbc_scanner;")
         return conn
 
     def connection_p(self, autocommit=False):
         conn = pyodbc.connect(self.dsn)
         conn.autocommit = autocommit
-        return conn        
+        return conn
 
     def full_table_name(self):
         return f"{quote_identifier(self.schema)}.{quote_identifier(self.table)}"
@@ -107,9 +117,12 @@ class SqlServerIOBase:
                 return fn()
             except Exception as e:
                 safe_msg = self.safe_error_message(e)
-                logging.warning(f"{context} retry {attempt+1}/{self.config.retries} failed: {safe_msg}")
-                time.sleep(2 ** attempt)
+                logging.warning(
+                    f"{context} retry {attempt+1}/{self.config.retries} failed: {safe_msg}"
+                )
+                time.sleep(2**attempt)
         raise RuntimeError(f"{context} failed after max retries")
+
 
 class Exporter(SqlServerIOBase):
     def __init__(
@@ -153,9 +166,12 @@ class Exporter(SqlServerIOBase):
                     AND index_id IN (0,1)
                 """
 
-                return c.execute(
-                    f"FROM odbc_query('{self.dsn}', $$ {query} $$)"
-                ).fetchone()[0] or 0
+                return (
+                    c.execute(
+                        f"FROM odbc_query('{self.dsn}', $$ {query} $$)"
+                    ).fetchone()[0]
+                    or 0
+                )
 
         self.total_rows = self.retry(_work, context="Fetching partition strategy")
 
@@ -187,9 +203,7 @@ class Exporter(SqlServerIOBase):
         """
 
         with self.connection_d() as c:
-            rows = c.execute(
-                f"FROM odbc_query('{self.dsn}', $$ {query} $$)"
-            ).fetchall()
+            rows = c.execute(f"FROM odbc_query('{self.dsn}', $$ {query} $$)").fetchall()
 
         return [row[0] for row in rows]
 
@@ -216,7 +230,8 @@ class Exporter(SqlServerIOBase):
         else:
             selected_columns = (
                 ", ".join(quote_identifier(c) for c in self.columns)
-                if self.columns is not None else "*"
+                if self.columns is not None
+                else "*"
             )
             return f"""
                 SELECT {selected_columns}
@@ -242,7 +257,7 @@ class Exporter(SqlServerIOBase):
 
         def _work():
             with self.connection_d() as c:
-                
+
                 try:
                     c.execute(f"""
                         COPY (
@@ -252,11 +267,12 @@ class Exporter(SqlServerIOBase):
                         (FORMAT parquet, COMPRESSION snappy, ROW_GROUP_SIZE {self.rowgroup_size})
                     """)
                 except Exception as e:
-                    raise RuntimeError(f"Failed exporting {filename}: {self.safe_error_message(e)}")
-
+                    raise RuntimeError(
+                        f"Failed exporting {filename}: {self.safe_error_message(e)}"
+                    )
 
         self.retry(_work, context=f"Export partition {n}")
-        
+
         duration = time.time() - start
         if filepath.exists():
             size_mb = filepath.stat().st_size / (1024 * 1024)
@@ -293,12 +309,14 @@ class Exporter(SqlServerIOBase):
             with open(manifest_file, "w") as f:
                 j.dump(filenames, f, indent=4)
             logging.info(
-                f"Manifest written: {manifest_file} "
-                f"files={len(filenames)}"
+                f"Manifest written: {manifest_file} " f"files={len(filenames)}"
             )
 
         except Exception as e:
-            logging.error(f"Failed to write manifest {manifest_file}: {self.safe_error_message(e)}")
+            logging.error(
+                f"Failed to write manifest {manifest_file}: {self.safe_error_message(e)}"
+            )
+
 
 class Importer(SqlServerIOBase):
     def __init__(
@@ -317,7 +335,11 @@ class Importer(SqlServerIOBase):
 
         self.worker_count = worker_count
         self.batch_size = batch_size
-        self.transaction_mode = TransactionMode(transaction_mode) if isinstance(transaction_mode, str) else transaction_mode
+        self.transaction_mode = (
+            TransactionMode(transaction_mode)
+            if isinstance(transaction_mode, str)
+            else transaction_mode
+        )
 
     def load_manifest(self):
         manifest_file = self.input_path / self.manifest_filename
@@ -386,6 +408,7 @@ class Importer(SqlServerIOBase):
                 # For FILE mode, wrap entire operation in retry logic
                 def _file_operation():
                     return self._import_file_impl(filepath, filename, start)
+
                 self.retry(_file_operation, context=f"Import file {filename}")
             else:
                 # For BATCH, ROWGROUP, and ROW modes, retries happen at granular level
@@ -399,15 +422,17 @@ class Importer(SqlServerIOBase):
     def _import_file_impl(self, filepath, filename, start):
         """Implementation of file import with transaction management."""
         # For ROW mode, use autocommit; for others, manual commit control
-        with self.connection_p(autocommit=(self.transaction_mode == TransactionMode.ROW)) as c:
+        with self.connection_p(
+            autocommit=(self.transaction_mode == TransactionMode.ROW)
+        ) as c:
             with c.cursor() as cur:
                 cur.fast_executemany = True
                 parquet_file = pq.ParquetFile(filepath)
                 columns = parquet_file.schema.names
                 table_columns = self.get_table_columns(cur)
                 self.validate_schema(columns, table_columns, filename)
-                column_list = ', '.join(quote_identifier(col) for col in columns)
-                placeholders = ', '.join('?' for _ in columns)
+                column_list = ", ".join(quote_identifier(col) for col in columns)
+                placeholders = ", ".join("?" for _ in columns)
 
                 insert_sql = f"""
                     INSERT INTO {self.full_table_name()} ({column_list})
@@ -422,7 +447,13 @@ class Importer(SqlServerIOBase):
                     if self.transaction_mode == TransactionMode.ROWGROUP:
                         # Wrap rowgroup processing in retry logic
                         rows_in_rg = self._import_rowgroup_with_retry(
-                            c, cur, table, insert_sql, filename, rg_idx, parquet_file.num_row_groups
+                            c,
+                            cur,
+                            table,
+                            insert_sql,
+                            filename,
+                            rg_idx,
+                            parquet_file.num_row_groups,
                         )
                         total_rows += rows_in_rg
                     else:
@@ -436,7 +467,9 @@ class Importer(SqlServerIOBase):
                                 total_rows += rows_in_batch
                             else:
                                 # ROW or FILE mode: just process the batch
-                                rows = list(zip(*[col.to_pylist() for col in batch.columns]))
+                                rows = list(
+                                    zip(*[col.to_pylist() for col in batch.columns])
+                                )
                                 cur.executemany(insert_sql, rows)
                                 total_rows += len(rows)
 
@@ -450,7 +483,9 @@ class Importer(SqlServerIOBase):
                 if self.transaction_mode == TransactionMode.FILE:
                     c.commit()
 
-                logging.info(f"Completed file={filename}, total rows: {total_rows}, in {time.time() - start:.2f}s")
+                logging.info(
+                    f"Completed file={filename}, total rows: {total_rows}, in {time.time() - start:.2f}s"
+                )
 
     def _import_batch_with_retry(self, c, cur, batch, insert_sql, filename):
         """Import a single batch with retry logic for BATCH mode."""
@@ -469,13 +504,15 @@ class Importer(SqlServerIOBase):
                         f"Batch retry {attempt+1}/{self.config.retries} failed in {filename}: {safe_msg}"
                     )
                     c.rollback()
-                    time.sleep(2 ** attempt)
+                    time.sleep(2**attempt)
                 else:
                     raise RuntimeError(
                         f"Batch import failed after {self.config.retries} retries: {safe_msg}"
                     )
 
-    def _import_rowgroup_with_retry(self, c, cur, table, insert_sql, filename, rg_idx, total_rg):
+    def _import_rowgroup_with_retry(
+        self, c, cur, table, insert_sql, filename, rg_idx, total_rg
+    ):
         """Import a single row group with retry logic for ROWGROUP mode."""
         for attempt in range(self.config.retries):
             try:
@@ -496,7 +533,7 @@ class Importer(SqlServerIOBase):
                         f"Row group retry {attempt+1}/{self.config.retries} failed in {filename}: {safe_msg}"
                     )
                     c.rollback()
-                    time.sleep(2 ** attempt)
+                    time.sleep(2**attempt)
                 else:
                     raise RuntimeError(
                         f"Row group import failed after {self.config.retries} retries: {safe_msg}"
@@ -507,12 +544,12 @@ class Importer(SqlServerIOBase):
 
         with ThreadPoolExecutor(max_workers=self.worker_count) as executor:
             futures = [
-                executor.submit(self.import_file, filename)
-                for filename in filenames
+                executor.submit(self.import_file, filename) for filename in filenames
             ]
 
             for future in as_completed(futures):
                 future.result()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     pass

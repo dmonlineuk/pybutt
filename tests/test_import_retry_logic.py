@@ -9,9 +9,10 @@ Covers:
 - Exponential backoff behavior
 - Retry exhaustion
 """
-from pathlib import Path
-from unittest.mock import MagicMock, patch, call, Mock
+
 import time
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 
@@ -215,7 +216,9 @@ class TestBatchModeRetry:
         mock_cursor.executemany.side_effect = Exception("Persistent connection error")
 
         with patch("time.sleep"):
-            with pytest.raises(RuntimeError, match="Batch import failed after 3 retries"):
+            with pytest.raises(
+                RuntimeError, match="Batch import failed after 3 retries"
+            ):
                 importer_batch_mode._import_batch_with_retry(
                     mock_connection,
                     mock_cursor,
@@ -345,7 +348,9 @@ class TestRowGroupModeRetry:
         mock_cursor.executemany.side_effect = Exception("Persistent error")
 
         with patch("time.sleep"):
-            with pytest.raises(RuntimeError, match="Row group import failed after 3 retries"):
+            with pytest.raises(
+                RuntimeError, match="Row group import failed after 3 retries"
+            ):
                 importer_rowgroup_mode._import_rowgroup_with_retry(
                     mock_connection,
                     mock_cursor,
@@ -375,7 +380,9 @@ class TestFileModeRetry:
         assert mock_impl.call_count == 1
 
     @patch("pybutt.core.Importer._import_file_impl")
-    def test_file_retry_fails_then_succeeds(self, mock_impl, importer_file_mode, tmp_path):
+    def test_file_retry_fails_then_succeeds(
+        self, mock_impl, importer_file_mode, tmp_path
+    ):
         """Test that file import retries and succeeds on second attempt."""
         mock_impl.side_effect = [
             Exception("Connection error"),
@@ -393,7 +400,9 @@ class TestFileModeRetry:
         mock_impl.side_effect = Exception("Persistent connection error")
 
         with patch("time.sleep"):
-            with pytest.raises(RuntimeError, match="Import file .* failed after max retries"):
+            with pytest.raises(
+                RuntimeError, match="Import file .* failed after max retries"
+            ):
                 importer_file_mode.import_file("test.parquet")
 
         assert mock_impl.call_count == 3
@@ -453,8 +462,12 @@ class TestImportFileImpl:
         parquet_file.write_bytes(b"fake parquet")
 
         # Call import
-        with patch.object(importer_batch_mode, "connection_p", return_value=mock_connection):
-            importer_batch_mode._import_file_impl(parquet_file, "test.parquet", time.time())
+        with patch.object(
+            importer_batch_mode, "connection_p", return_value=mock_connection
+        ):
+            importer_batch_mode._import_file_impl(
+                parquet_file, "test.parquet", time.time()
+            )
 
         # Verify _import_batch_with_retry was called for each batch
         assert mock_batch_retry.call_count == 2
@@ -491,8 +504,12 @@ class TestImportFileImpl:
         parquet_file.write_bytes(b"fake parquet")
 
         # Call import
-        with patch.object(importer_rowgroup_mode, "connection_p", return_value=mock_connection):
-            importer_rowgroup_mode._import_file_impl(parquet_file, "test.parquet", time.time())
+        with patch.object(
+            importer_rowgroup_mode, "connection_p", return_value=mock_connection
+        ):
+            importer_rowgroup_mode._import_file_impl(
+                parquet_file, "test.parquet", time.time()
+            )
 
         # Verify _import_rowgroup_with_retry was called for each rowgroup
         assert mock_rg_retry.call_count == 2

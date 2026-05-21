@@ -45,8 +45,10 @@ def build_sql_config(
 ) -> SqlConfig:
     if not trusted_connection:
         if not username:
-            raise typer.BadParameter("username is required unless --trusted-connection is used")
-        
+            raise typer.BadParameter(
+                "username is required unless --trusted-connection is used"
+            )
+
         # Prompt for password if not provided
         if not password:
             password = getpass.getpass("Enter your password: ")
@@ -66,14 +68,23 @@ def build_sql_config(
     )
 
 
-@app.command("export", help="Export a SQL Server table to Parquet and write a manifest of output file names.")
+@app.command(
+    "export",
+    help="Export a SQL Server table to Parquet and write a manifest of output file names.",
+)
 def export(
-    server: str = typer.Option(..., "--server", "-s", help="SQL Server hostname or instance."),
-    database: str = typer.Option(..., "--database", "-d", help="Target SQL Server database."),
+    server: str = typer.Option(
+        ..., "--server", "-s", help="SQL Server hostname or instance."
+    ),
+    database: str = typer.Option(
+        ..., "--database", "-d", help="Target SQL Server database."
+    ),
     schema: str = typer.Option("dbo", "--schema", "-S", help="Target table schema."),
     table: str = typer.Option(..., "--table", "-t", help="Target table name."),
     output_path: Path = typer.Option(
-        ..., "--output-path", "-o",
+        ...,
+        "--output-path",
+        "-o",
         help="Directory to write Parquet files and manifest.",
         file_okay=False,
         dir_okay=True,
@@ -198,21 +209,31 @@ def export(
     typer.secho("Export completed successfully.", fg=typer.colors.GREEN)
 
 
-@app.command("import", help="Import Parquet files into a SQL Server table using a manifest file.")
+@app.command(
+    "import", help="Import Parquet files into a SQL Server table using a manifest file."
+)
 def import_data(
-    server: str = typer.Option(..., "--server", "-s", help="SQL Server hostname or instance."),
-    database: str = typer.Option(..., "--database", "-d", help="Target SQL Server database."),
+    server: str = typer.Option(
+        ..., "--server", "-s", help="SQL Server hostname or instance."
+    ),
+    database: str = typer.Option(
+        ..., "--database", "-d", help="Target SQL Server database."
+    ),
     schema: str = typer.Option("dbo", "--schema", "-S", help="Target table schema."),
     table: str = typer.Option(..., "--table", "-t", help="Target table name."),
     input_path: Path = typer.Option(
-        ..., "--input-path", "-i",
+        ...,
+        "--input-path",
+        "-i",
         help="Directory containing Parquet files and the manifest.",
         exists=True,
         file_okay=False,
         dir_okay=True,
     ),
     manifest_filename: str = typer.Option(
-        ..., "--manifest-filename", "-m",
+        ...,
+        "--manifest-filename",
+        "-m",
         help="Manifest filename containing exported parquet file names.",
     ),
     trusted_connection: bool = typer.Option(

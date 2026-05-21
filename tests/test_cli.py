@@ -12,7 +12,15 @@ runner = CliRunner()
 class DummyExporter:
     last_instance = None
 
-    def __init__(self, config, output_path, pk_column=None, columns=None, worker_count=1, file_count=1):
+    def __init__(
+        self,
+        config,
+        output_path,
+        pk_column=None,
+        columns=None,
+        worker_count=1,
+        file_count=1,
+    ):
         self.config = config
         self.output_path = Path(output_path)
         self.pk_column = pk_column
