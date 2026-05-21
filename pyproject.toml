@@ -38,11 +38,11 @@ include_trailing_comma = true
 
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
-ignore = []
+ignore = ["B008"]
 
 [tool.ruff.format]
 quote-style = "double"

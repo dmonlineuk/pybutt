@@ -3,7 +3,6 @@ from __future__ import annotations
 import getpass
 import logging
 from pathlib import Path
-from typing import Optional
 
 import typer
 
@@ -11,7 +10,9 @@ from pybutt.core import Exporter, Importer, SqlConfig, TransactionMode
 
 app = typer.Typer(
     context_settings={"help_option_names": ["-?", "--help"]},
-    help="""PyButt CLI for exporting SQL Server tables to Parquet files and importing Parquet data back into SQL Server.
+    help="""
+PyButt CLI for exporting SQL Server tables to Parquet files and importing
+Parquet data back into SQL Server.
 
 Commands:
   export   Export SQL Server data to one or more Parquet files.
@@ -20,7 +21,7 @@ Commands:
 )
 
 
-def parse_columns(columns: Optional[str]) -> Optional[list[str]]:
+def parse_columns(columns: str | None) -> list[str] | None:
     if columns is None:
         return None
 
@@ -35,8 +36,8 @@ def build_sql_config(
     database: str,
     schema: str,
     table: str,
-    username: Optional[str],
-    password: Optional[str],
+    username: str | None,
+    password: str | None,
     driver: str,
     trusted_connection: bool,
     trust_cert: bool,
@@ -70,7 +71,10 @@ def build_sql_config(
 
 @app.command(
     "export",
-    help="Export a SQL Server table to Parquet and write a manifest of output file names.",
+    help=(
+        "Export a SQL Server table to Parquet and write a manifest of output "
+        "file names."
+    ),
 )
 def export(
     server: str = typer.Option(
@@ -96,13 +100,13 @@ def export(
         "-T",
         help="Use integrated Windows authentication instead of username/password.",
     ),
-    username: Optional[str] = typer.Option(
+    username: str | None = typer.Option(
         None,
         "--username",
         "-u",
         help="SQL Server username when not using trusted connection.",
     ),
-    password: Optional[str] = typer.Option(
+    password: str | None = typer.Option(
         None,
         "--password",
         "-p",
@@ -133,13 +137,13 @@ def export(
         help="Number of retry attempts for transient SQL errors.",
         min=1,
     ),
-    pk_column: Optional[str] = typer.Option(
+    pk_column: str | None = typer.Option(
         None,
         "--pk-column",
         "-P",
         help="Primary key column for deterministic partitioning.",
     ),
-    columns: Optional[str] = typer.Option(
+    columns: str | None = typer.Option(
         None,
         "--columns",
         "-c",
@@ -210,7 +214,10 @@ def export(
 
 
 @app.command(
-    "import", help="Import Parquet files into a SQL Server table using a manifest file."
+    "import", help=(
+        "Import Parquet files into a SQL Server table using a "
+        "manifest file."
+    )
 )
 def import_data(
     server: str = typer.Option(
@@ -242,13 +249,13 @@ def import_data(
         "-T",
         help="Use integrated Windows authentication instead of username/password.",
     ),
-    username: Optional[str] = typer.Option(
+    username: str | None = typer.Option(
         None,
         "--username",
         "-u",
         help="SQL Server username when not using trusted connection.",
     ),
-    password: Optional[str] = typer.Option(
+    password: str | None = typer.Option(
         None,
         "--password",
         "-p",
@@ -303,7 +310,10 @@ def import_data(
         TransactionMode.BATCH,
         "--transaction-mode",
         "-tm",
-        help="Transaction scope: row (no transaction, auto-commit), batch (per batch, recommended), rowgroup (per row group), file (entire file).",
+        help=(
+            "Transaction scope: row (no transaction, auto-commit), batch (per batch, "
+            "recommended), rowgroup (per row group), file (entire file)."
+        ),
     ),
 ) -> None:
     """Import Parquet files into a SQL Server table.

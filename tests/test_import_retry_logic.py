@@ -11,8 +11,7 @@ Covers:
 """
 
 import time
-from pathlib import Path
-from unittest.mock import MagicMock, Mock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -155,12 +154,6 @@ class TestBatchModeRetry:
         mock_batch.columns[0].to_pylist.return_value = [1, 2, 3]
         mock_batch.columns[1].to_pylist.return_value = ["a", "b", "c"]
 
-        rows = [
-            (1, "a"),
-            (2, "b"),
-            (3, "c"),
-        ]
-
         rows_returned = importer_batch_mode._import_batch_with_retry(
             mock_connection,
             mock_cursor,
@@ -228,7 +221,8 @@ class TestBatchModeRetry:
                 )
 
         assert mock_cursor.executemany.call_count == 3
-        # Rollback happens on first 2 failures, not on the final attempt (where we raise)
+        # Rollback happens on first 2 failures,
+        # not on the final attempt (where we raise)
         assert mock_connection.rollback.call_count == 2
 
     def test_batch_retry_exponential_backoff(self, importer_batch_mode):
@@ -361,7 +355,8 @@ class TestRowGroupModeRetry:
                     total_rg=1,
                 )
 
-        # Rollback happens on first 2 failures, not on the final attempt (where we raise)
+        # Rollback happens on first 2 failures,
+        # not on the final attempt (where we raise)
         assert mock_connection.rollback.call_count == 2
 
 
@@ -433,7 +428,10 @@ class TestImportFileImpl:
     def test_import_file_impl_batch_mode_retry_per_batch(
         self, mock_batch_retry, mock_parquet, importer_batch_mode, tmp_path
     ):
-        """Test that _import_file_impl calls _import_batch_with_retry for each batch in BATCH mode."""
+        """
+        Test that _import_file_impl calls _import_batch_with_retry for each batch
+        in BATCH mode.
+        """
         # Setup mock parquet file
         mock_pq_file = MagicMock()
         mock_pq_file.schema.names = ["col1", "col2"]
@@ -477,7 +475,10 @@ class TestImportFileImpl:
     def test_import_file_impl_rowgroup_mode_retry_per_rowgroup(
         self, mock_rg_retry, mock_parquet, importer_rowgroup_mode, tmp_path
     ):
-        """Test that _import_file_impl calls _import_rowgroup_with_retry for each rowgroup in ROWGROUP mode."""
+        """
+        Test that _import_file_impl calls _import_rowgroup_with_retry for each
+        rowgroup in ROWGROUP mode.
+        """
         # Setup mock parquet file
         mock_pq_file = MagicMock()
         mock_pq_file.schema.names = ["col1", "col2"]

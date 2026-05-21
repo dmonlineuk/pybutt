@@ -6,7 +6,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from multiprocessing import get_context
 from pathlib import Path
 
@@ -17,7 +17,7 @@ import pyodbc
 logging.basicConfig(level=logging.INFO)
 
 
-class TransactionMode(str, Enum):
+class TransactionMode(StrEnum):
     """Control how transactions are handled during import."""
 
     ROW = "row"  # Each row commits individually (no transaction)
@@ -118,7 +118,8 @@ class SqlServerIOBase:
             except Exception as e:
                 safe_msg = self.safe_error_message(e)
                 logging.warning(
-                    f"{context} retry {attempt+1}/{self.config.retries} failed: {safe_msg}"
+                    f"{context} retry {attempt+1}/{self.config.retries} "
+                    f"failed: {safe_msg}"
                 )
                 time.sleep(2**attempt)
         raise RuntimeError(f"{context} failed after max retries")
@@ -222,7 +223,9 @@ class Exporter(SqlServerIOBase):
                 SELECT {selected_columns}
                 FROM (
                     SELECT {selected_columns},
-                           ROW_NUMBER() OVER (ORDER BY {quote_identifier(self.pk_column)}) AS rn
+                           ROW_NUMBER() OVER (
+                                ORDER BY {quote_identifier(self.pk_column)}
+                            ) AS rn
                     FROM {self.full_table_name()}
                 ) t
                 WHERE rn > {start} AND rn <= {end}
@@ -262,14 +265,18 @@ class Exporter(SqlServerIOBase):
                     c.execute(f"""
                         COPY (
                             FROM odbc_query('{self.dsn}', $$ {query} $$)
-                        ) 
+                        )
                         TO '{str(filepath).replace("\\", "/")}'
-                        (FORMAT parquet, COMPRESSION snappy, ROW_GROUP_SIZE {self.rowgroup_size})
+                        (
+                            FORMAT parquet,
+                            COMPRESSION snappy,
+                            ROW_GROUP_SIZE {self.rowgroup_size}
+                        )
                     """)
                 except Exception as e:
                     raise RuntimeError(
                         f"Failed exporting {filename}: {self.safe_error_message(e)}"
-                    )
+                    ) from e
 
         self.retry(_work, context=f"Export partition {n}")
 
@@ -314,7 +321,8 @@ class Exporter(SqlServerIOBase):
 
         except Exception as e:
             logging.error(
-                f"Failed to write manifest {manifest_file}: {self.safe_error_message(e)}"
+                f"Failed to write manifest {manifest_file}: "
+                f"{self.safe_error_message(e)}"
             )
 
 
@@ -468,7 +476,10 @@ class Importer(SqlServerIOBase):
                             else:
                                 # ROW or FILE mode: just process the batch
                                 rows = list(
-                                    zip(*[col.to_pylist() for col in batch.columns])
+                                    zip(
+                                        *[col.to_pylist() for col in batch.columns],
+                                        strict=True
+                                    )
                                 )
                                 cur.executemany(insert_sql, rows)
                                 total_rows += len(rows)
@@ -484,12 +495,13 @@ class Importer(SqlServerIOBase):
                     c.commit()
 
                 logging.info(
-                    f"Completed file={filename}, total rows: {total_rows}, in {time.time() - start:.2f}s"
+                    f"Completed file={filename}, total rows: {total_rows}, in "
+                    f"{time.time() - start:.2f}s"
                 )
 
     def _import_batch_with_retry(self, c, cur, batch, insert_sql, filename):
         """Import a single batch with retry logic for BATCH mode."""
-        rows = list(zip(*[col.to_pylist() for col in batch.columns]))
+        rows = list(zip(*[col.to_pylist() for col in batch.columns], strict=True))
 
         for attempt in range(self.config.retries):
             try:
@@ -501,14 +513,16 @@ class Importer(SqlServerIOBase):
 
                 if attempt < self.config.retries - 1:
                     logging.warning(
-                        f"Batch retry {attempt+1}/{self.config.retries} failed in {filename}: {safe_msg}"
+                        f"Batch retry {attempt+1}/{self.config.retries} failed in "
+                        f"{filename}: {safe_msg}"
                     )
                     c.rollback()
                     time.sleep(2**attempt)
                 else:
                     raise RuntimeError(
-                        f"Batch import failed after {self.config.retries} retries: {safe_msg}"
-                    )
+                        f"Batch import failed after {self.config.retries} retries: "
+                        f"{safe_msg}"
+                    ) from None
 
     def _import_rowgroup_with_retry(
         self, c, cur, table, insert_sql, filename, rg_idx, total_rg
@@ -518,7 +532,10 @@ class Importer(SqlServerIOBase):
             try:
                 total_rows = 0
                 for batch in table.to_batches(max_chunksize=self.batch_size):
-                    rows = list(zip(*[col.to_pylist() for col in batch.columns]))
+                    rows = list(
+                        zip(*[col.to_pylist() for col in batch.columns],
+                            strict=True)
+                    )
                     cur.executemany(insert_sql, rows)
                     total_rows += len(rows)
 
@@ -530,14 +547,16 @@ class Importer(SqlServerIOBase):
 
                 if attempt < self.config.retries - 1:
                     logging.warning(
-                        f"Row group retry {attempt+1}/{self.config.retries} failed in {filename}: {safe_msg}"
+                        f"Row group retry {attempt+1}/{self.config.retries} failed in "
+                        f"{filename}: {safe_msg}"
                     )
                     c.rollback()
                     time.sleep(2**attempt)
                 else:
                     raise RuntimeError(
-                        f"Row group import failed after {self.config.retries} retries: {safe_msg}"
-                    )
+                        f"Row group import failed after {self.config.retries} retries: "
+                        f"{safe_msg}"
+                    ) from None
 
     def perform_work(self):
         filenames = self.load_manifest()
