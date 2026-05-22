@@ -19,6 +19,8 @@ class DummyExporter:
         columns=None,
         worker_count=1,
         file_count=1,
+        rowgroup_size=1_048_576,
+        engine="duckdb",
     ):
         self.config = config
         self.output_path = Path(output_path)
@@ -26,6 +28,8 @@ class DummyExporter:
         self.columns = columns
         self.worker_count = worker_count
         self.file_count = file_count
+        self.rowgroup_size = rowgroup_size
+        self.engine = engine
         DummyExporter.last_instance = self
 
     def perform_work(self):
@@ -43,6 +47,7 @@ class DummyImporter:
         worker_count=1,
         batch_size=1000,
         transaction_mode=None,
+        engine="pyodbc",
     ):
         self.config = config
         self.input_path = Path(input_path)
@@ -50,6 +55,7 @@ class DummyImporter:
         self.worker_count = worker_count
         self.batch_size = batch_size
         self.transaction_mode = transaction_mode
+        self.engine = engine
         DummyImporter.last_instance = self
 
     def perform_work(self):
@@ -125,7 +131,70 @@ def test_export_command_parses_options(monkeypatch, tmp_path):
     assert exporter.columns == ["a", "b", "c"]
     assert exporter.worker_count == 2
     assert exporter.file_count == 3
+    assert exporter.engine == "duckdb"
     assert exporter.output_path == output_dir
+
+
+def test_export_command_parses_engine_option(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Exporter", DummyExporter)
+
+    output_dir = tmp_path / "out"
+    result = runner.invoke(
+        cli.app,
+        [
+            "export",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--output-path",
+            str(output_dir),
+            "--trusted-connection",
+            "--engine",
+            "pyodbc",
+        ],
+    )
+
+    assert result.exit_code == 0
+    exporter = DummyExporter.last_instance
+    assert exporter.engine == "pyodbc"
+
+
+def test_import_command_parses_engine_option(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Importer", DummyImporter)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    manifest = "manifest.json"
+    result = runner.invoke(
+        cli.app,
+        [
+            "import",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--input-path",
+            str(input_dir),
+            "--manifest-filename",
+            manifest,
+            "--trusted-connection",
+            "--engine",
+            "duckdb",
+        ],
+    )
+
+    assert result.exit_code == 0
+    importer = DummyImporter.last_instance
+    assert importer.engine == "duckdb"
 
 
 def test_import_command_parses_options(monkeypatch, tmp_path):
@@ -170,6 +239,7 @@ def test_import_command_parses_options(monkeypatch, tmp_path):
     assert importer.manifest_filename == manifest
     assert importer.worker_count == 4
     assert importer.batch_size == 2500
+    assert importer.engine == "pyodbc"
 
 
 def test_export_command_requires_username_without_trusted_connection():

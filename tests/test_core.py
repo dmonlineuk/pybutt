@@ -79,6 +79,45 @@ def test_exporter_invalid_file_count(monkeypatch):
         Exporter(config=config, output_path=Path("./out"), worker_count=1, file_count=0)
 
 
+def test_exporter_invalid_engine(monkeypatch):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+
+    monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
+
+    with pytest.raises(ValueError, match="engine must be one of"):
+        Exporter(
+            config=config,
+            output_path=Path("./out"),
+            worker_count=1,
+            file_count=1,
+            engine="invalid",
+        )
+
+
+def test_importer_invalid_engine():
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+
+    with pytest.raises(ValueError, match="engine must be one of"):
+        Importer(
+            config=config,
+            input_path=Path("./data"),
+            manifest_filename="manifest.json",
+            engine="invalid",
+        )
+
+
 def test_exporter_build_partition_query_without_pk(monkeypatch):
     config = SqlConfig(
         server="localhost",
