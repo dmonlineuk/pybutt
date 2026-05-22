@@ -117,6 +117,7 @@ pybutt export \
 --worker-count,         -wc     Number of worker processes (default: 1)
 --file-count,           -fc     Number of output Parquet files (default: 1)
 --rowgroup-size,        -rs     Number of rows per rowgroup inside each Parquet file (default 1048576)
+--fetch-size,           -fs     Cursor fetch size for pyodbc export (default: min(max(1024, rowgroup_size), 8192))
 --engine,               -E      Export engine to use: duckdb or pyodbc (default: duckdb)
 --verbose,              -v      Show verbose logging output
 ```
@@ -359,6 +360,7 @@ exporter = Exporter(
     columns=None,                            # None for all columns
     worker_count=4,                          # Number of parallel processes
     file_count=4,                            # Number of output files
+    fetch_size=None,                         # Cursor fetch size for pyodbc export (None = auto)
 )
 
 exporter.perform_work()
@@ -375,6 +377,7 @@ exporter = Exporter(
     columns=["OrderID", "OrderDate", "Amount"],
     worker_count=8,
     file_count=8,
+    fetch_size=None,                         # Optional: tune pyodbc fetch size for streaming
 )
 
 exporter.perform_work()
