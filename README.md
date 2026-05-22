@@ -117,6 +117,7 @@ pybutt export \
 --worker-count,         -wc     Number of worker processes (default: 1)
 --file-count,           -fc     Number of output Parquet files (default: 1)
 --rowgroup-size,        -rs     Number of rows per rowgroup inside each Parquet file (default 1048576)
+--engine,               -E      Export engine to use: duckdb or pyodbc (default: duckdb)
 --verbose,              -v      Show verbose logging output
 ```
 
@@ -132,6 +133,17 @@ pybutt export \
   --username dbuser \
   --worker-count 4 \
   --file-count 4
+```
+
+Export using the pyodbc engine explicitly:
+```bash
+pybutt export \
+  --server sqlserver.example.com \
+  --database MyDatabase \
+  --table Customers \
+  --output-path ./exports/customers \
+  --username dbuser \
+  --engine pyodbc
 ```
 
 Export specific columns using primary key partitioning:
@@ -190,6 +202,7 @@ pybutt import \
 --retries,              -rc     Number of retry attempts for transient errors (default: 3)
 --worker-count,         -wc     Number of parallel import threads (default: 1)
 --batch-size,           -b      Rows per batch insert (default: 1000)
+--engine,               -E      Import engine to use: duckdb or pyodbc (default: pyodbc)
 --transaction-mode,     -tm     Transaction scope: row, batch (default), rowgroup, file
 --verbose,              -v      Show verbose logging output
 ```
@@ -205,6 +218,18 @@ pybutt import \
   --input-path ./exports/customers \
   --manifest-filename customers_manifest.json \
   --username dbuser
+```
+
+Import using the duckdb engine explicitly:
+```bash
+pybutt import \
+  --server sqlserver.example.com \
+  --database MyDatabase \
+  --table Customers \
+  --input-path ./exports/customers \
+  --manifest-filename customers_manifest.json \
+  --username dbuser \
+  --engine duckdb
 ```
 
 High-throughput import with larger batches (BATCH mode):
