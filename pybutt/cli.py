@@ -174,6 +174,16 @@ def export(
         help="Number of rows per rowgroup in the Parquet files.",
         min=1,
     ),
+    fetch_size: int | None = typer.Option(  # noqa: B008
+        None,
+        "--fetch-size",
+        "-fs",
+        help=(
+            "Cursor fetch size for pyodbc export. "
+            "Defaults to min(max(1024, rowgroup_size), 8192)."
+        ),
+        min=1,
+    ),
     engine: str = typer.Option(  # noqa: B008
         "duckdb",
         "--engine",
@@ -219,6 +229,7 @@ def export(
         worker_count=worker_count,
         file_count=file_count,
         rowgroup_size=rowgroup_size,
+        fetch_size=fetch_size,
         engine=engine.lower(),
     )
     exporter.perform_work()

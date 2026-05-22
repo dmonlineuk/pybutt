@@ -145,6 +145,7 @@ class Exporter(SqlServerIOBase):
         worker_count=1,
         file_count=1,
         rowgroup_size=1_048_576,
+        fetch_size=None,
         engine="duckdb",
     ):
         super().__init__(config)
@@ -158,9 +159,17 @@ class Exporter(SqlServerIOBase):
         if file_count < 1:
             raise ValueError("file_count must be at least 1")
 
+        if fetch_size is not None and fetch_size < 1:
+            raise ValueError("fetch_size must be at least 1")
+
         self.worker_count = worker_count
         self.file_count = file_count
         self.rowgroup_size = rowgroup_size
+        self.fetch_size = (
+            fetch_size
+            if fetch_size is not None
+            else min(max(1024, self.rowgroup_size), 8192)
+        )
         self.engine = engine
 
         self.output_path = Path(output_path)
@@ -353,7 +362,7 @@ class Exporter(SqlServerIOBase):
                     )
 
                 columns = [desc[0] for desc in cur.description]
-                fetch_size = min(max(1024, self.rowgroup_size), 8192)
+                fetch_size = self.fetch_size
 
                 # Read first non-empty batch to infer a stable schema
                 try:

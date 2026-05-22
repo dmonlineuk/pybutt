@@ -100,6 +100,49 @@ def test_exporter_invalid_engine(monkeypatch):
         )
 
 
+def test_exporter_fetch_size_default(monkeypatch):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+
+    monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
+    exporter = Exporter(
+        config=config,
+        output_path=Path("./out"),
+        worker_count=1,
+        file_count=1,
+        rowgroup_size=1_048_576,
+    )
+
+    assert exporter.fetch_size == 8192
+
+
+def test_exporter_fetch_size_override(monkeypatch):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+
+    monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
+    exporter = Exporter(
+        config=config,
+        output_path=Path("./out"),
+        worker_count=1,
+        file_count=1,
+        rowgroup_size=1_048_576,
+        fetch_size=16_384,
+    )
+
+    assert exporter.fetch_size == 16_384
+
+
 def test_importer_invalid_engine():
     config = SqlConfig(
         server="localhost",

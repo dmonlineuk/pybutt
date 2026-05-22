@@ -20,6 +20,7 @@ class DummyExporter:
         worker_count=1,
         file_count=1,
         rowgroup_size=1_048_576,
+        fetch_size=None,
         engine="duckdb",
     ):
         self.config = config
@@ -29,6 +30,7 @@ class DummyExporter:
         self.worker_count = worker_count
         self.file_count = file_count
         self.rowgroup_size = rowgroup_size
+        self.fetch_size = fetch_size
         self.engine = engine
         DummyExporter.last_instance = self
 
