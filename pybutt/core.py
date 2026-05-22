@@ -115,16 +115,23 @@ class SqlServerIOBase:
         return msg
 
     def retry(self, fn, context="operation"):
+        last_error: Exception | None = None
         for attempt in range(self.config.retries):
             try:
                 return fn()
             except Exception as e:
+                last_error = e
                 safe_msg = self.safe_error_message(e)
                 logging.warning(
                     f"{context} retry {attempt+1}/{self.config.retries} "
                     f"failed: {safe_msg}"
                 )
                 time.sleep(2**attempt)
+        if last_error is not None:
+            raise RuntimeError(
+                f"{context} failed after max retries: "
+                f"{self.safe_error_message(last_error)}"
+            ) from last_error
         raise RuntimeError(f"{context} failed after max retries")
 
 
@@ -289,21 +296,26 @@ class Exporter(SqlServerIOBase):
         return pa.string()
 
     def _pyodbc_schema_from_description(self, description):
-        return pa.schema(
-            [
+        fields = []
+        for column in description:
+            name = column[0]
+            type_code = column[1]
+            precision = column[5] if len(column) > 5 else None
+            scale = column[6] if len(column) > 6 else None
+            nullable = column[6] if len(column) > 6 else True
+            fields.append(
                 pa.field(
-                    column[0],
+                    name,
                     self._pyodbc_type_code_to_pyarrow(
-                        column[1],
-                        column[5],
-                        column[6],
-                        column[3],
+                        type_code,
+                        precision,
+                        scale,
+                        column[3] if len(column) > 3 else None,
                     ),
-                    nullable=column[6],
+                    nullable=nullable,
                 )
-                for column in description
-            ]
-        )
+            )
+        return pa.schema(fields)
 
     def _export_partition_with_duckdb(self, query, filepath, filename):
         with self.connection_d() as c:
@@ -334,22 +346,79 @@ class Exporter(SqlServerIOBase):
                         f"Failed exporting {filename}: {self.safe_error_message(e)}"
                     ) from e
 
+                if cur.description is None:
+                    raise RuntimeError(
+                        f"Failed exporting {filename}: query returned no column "
+                        "metadata"
+                    )
+
                 columns = [desc[0] for desc in cur.description]
-                schema = self._pyodbc_schema_from_description(cur.description)
-                writer = pq.ParquetWriter(
-                    str(filepath.as_posix()), schema, compression="snappy"
-                )
                 fetch_size = min(max(1024, self.rowgroup_size), 8192)
 
-                while True:
-                    rows = cur.fetchmany(fetch_size)
-                    if not rows:
-                        break
-                    batch = [dict(zip(columns, row, strict=True)) for row in rows]
-                    table = pa.Table.from_pylist(batch, schema=schema)
-                    writer.write_table(table, row_group_size=self.rowgroup_size)
+                # Read first non-empty batch to infer a stable schema
+                try:
+                    first_rows = cur.fetchmany(fetch_size)
+                    if not first_rows:
+                        # No rows: create an empty file with string columns
+                        empty_schema = pa.schema(
+                            [pa.field(c, pa.string()) for c in columns]
+                        )
+                        with pq.ParquetWriter(
+                            str(filepath.as_posix()), empty_schema, compression="snappy"
+                        ) as writer:
+                            writer.write_table(
+                                pa.Table.from_pydict(
+                                    {c: [] for c in columns}, schema=empty_schema
+                                )
+                            )
+                        return
 
-                writer.close()
+                    batch_dicts = [
+                        dict(zip(columns, row, strict=True)) for row in first_rows
+                    ]
+                    first_table = pa.Table.from_pylist(batch_dicts)
+                    target_schema = first_table.schema
+
+                    with pq.ParquetWriter(
+                        str(filepath.as_posix()), target_schema, compression="snappy"
+                    ) as writer:
+                        writer.write_table(
+                            first_table, row_group_size=self.rowgroup_size
+                        )
+
+                        # Stream remaining rows and coerce to target schema
+                        while True:
+                            rows = cur.fetchmany(fetch_size)
+                            if not rows:
+                                break
+                            batch = [
+                                dict(zip(columns, row, strict=True)) for row in rows
+                            ]
+                            try:
+                                tbl = pa.Table.from_pylist(batch)
+                                if tbl.schema != target_schema:
+                                    # Coerce each column to the target type
+                                    arrays = []
+                                    for field in target_schema:
+                                        name = field.name
+                                        col_type = field.type
+                                        vals = [r.get(name) for r in batch]
+                                        arrays.append(pa.array(vals, type=col_type))
+                                    tbl = pa.Table.from_arrays(
+                                        arrays, names=[f.name for f in target_schema]
+                                    )
+                                writer.write_table(
+                                    tbl, row_group_size=self.rowgroup_size
+                                )
+                            except Exception as e:
+                                raise RuntimeError(
+                                    f"Failed exporting {filename}: "
+                                    f"{self.safe_error_message(e)}"
+                                ) from e
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed exporting {filename}: {self.safe_error_message(e)}"
+                    ) from e
 
     def export_partition(self, n):
         thread_id = threading.get_ident()
