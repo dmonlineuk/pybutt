@@ -1,5 +1,7 @@
 from pathlib import Path
+from unittest.mock import MagicMock
 
+import pyarrow.parquet as pq
 import pytest
 
 from pybutt.core import (
@@ -77,6 +79,131 @@ def test_exporter_invalid_file_count(monkeypatch):
 
     with pytest.raises(ValueError, match="file_count must be at least 1"):
         Exporter(config=config, output_path=Path("./out"), worker_count=1, file_count=0)
+
+
+def test_exporter_invalid_engine(monkeypatch):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+
+    monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
+
+    with pytest.raises(ValueError, match="engine must be one of"):
+        Exporter(
+            config=config,
+            output_path=Path("./out"),
+            worker_count=1,
+            file_count=1,
+            engine="invalid",
+        )
+
+
+def test_exporter_fetch_size_default(monkeypatch):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+
+    monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
+    exporter = Exporter(
+        config=config,
+        output_path=Path("./out"),
+        worker_count=1,
+        file_count=1,
+        rowgroup_size=1_048_576,
+    )
+
+    assert exporter.fetch_size == 8192
+
+
+def test_exporter_fetch_size_override(monkeypatch):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+
+    monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
+    exporter = Exporter(
+        config=config,
+        output_path=Path("./out"),
+        worker_count=1,
+        file_count=1,
+        rowgroup_size=1_048_576,
+        fetch_size=16_384,
+    )
+
+    assert exporter.fetch_size == 16_384
+
+
+def test_pyodbc_export_buffers_rows_for_parquet_rowgroups(monkeypatch, tmp_path):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+
+    monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
+    exporter = Exporter(
+        config=config,
+        output_path=tmp_path,
+        worker_count=1,
+        file_count=1,
+        rowgroup_size=2,
+        fetch_size=1,
+        engine="pyodbc",
+    )
+
+    mock_connection = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.description = [("col1",)]
+    mock_cursor.execute.return_value = None
+    rows = [(1,), (2,), (3,), (4,)]
+    mock_cursor.fetchmany.side_effect = [[rows[0]], [rows[1]], [rows[2]], [rows[3]], []]
+    mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
+    mock_connection.__enter__.return_value = mock_connection
+    mock_connection.__exit__.return_value = None
+
+    exporter.connection_p = lambda *args, **kwargs: mock_connection
+
+    exporter._export_partition_with_pyodbc(
+        "SELECT col1 FROM dbo.MyTable",
+        tmp_path / "test.parquet",
+        "test.parquet",
+    )
+
+    parquet_file = pq.ParquetFile(tmp_path / "test.parquet")
+    assert parquet_file.num_row_groups == 2
+    assert parquet_file.metadata.num_rows == 4
+
+
+def test_importer_invalid_engine():
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+
+    with pytest.raises(ValueError, match="engine must be one of"):
+        Importer(
+            config=config,
+            input_path=Path("./data"),
+            manifest_filename="manifest.json",
+            engine="invalid",
+        )
 
 
 def test_exporter_build_partition_query_without_pk(monkeypatch):

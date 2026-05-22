@@ -11,10 +11,13 @@ from multiprocessing import get_context
 from pathlib import Path
 
 import duckdb as d
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pyodbc
 
 logging.basicConfig(level=logging.INFO)
+
+ENGINE_CHOICES = frozenset({"duckdb", "pyodbc"})
 
 
 class TransactionMode(StrEnum):
@@ -112,16 +115,23 @@ class SqlServerIOBase:
         return msg
 
     def retry(self, fn, context="operation"):
+        last_error: Exception | None = None
         for attempt in range(self.config.retries):
             try:
                 return fn()
             except Exception as e:
+                last_error = e
                 safe_msg = self.safe_error_message(e)
                 logging.warning(
                     f"{context} retry {attempt+1}/{self.config.retries} "
                     f"failed: {safe_msg}"
                 )
                 time.sleep(2**attempt)
+        if last_error is not None:
+            raise RuntimeError(
+                f"{context} failed after max retries: "
+                f"{self.safe_error_message(last_error)}"
+            ) from last_error
         raise RuntimeError(f"{context} failed after max retries")
 
 
@@ -135,18 +145,32 @@ class Exporter(SqlServerIOBase):
         worker_count=1,
         file_count=1,
         rowgroup_size=1_048_576,
+        fetch_size=None,
+        engine="duckdb",
     ):
         super().__init__(config)
 
         self.pk_column = validate_identifier(pk_column) if pk_column else None
         self.columns = [validate_identifier(c) for c in columns] if columns else None
 
+        if engine not in ENGINE_CHOICES:
+            raise ValueError(f"engine must be one of {sorted(ENGINE_CHOICES)}")
+
         if file_count < 1:
             raise ValueError("file_count must be at least 1")
+
+        if fetch_size is not None and fetch_size < 1:
+            raise ValueError("fetch_size must be at least 1")
 
         self.worker_count = worker_count
         self.file_count = file_count
         self.rowgroup_size = rowgroup_size
+        self.fetch_size = (
+            fetch_size
+            if fetch_size is not None
+            else min(max(1024, self.rowgroup_size), 8192)
+        )
+        self.engine = engine
 
         self.output_path = Path(output_path)
         self.output_path.mkdir(parents=True, exist_ok=True)
@@ -219,17 +243,17 @@ class Exporter(SqlServerIOBase):
             else:
                 selected_columns = ", ".join(quote_identifier(c) for c in self.columns)
 
-            return f"""
-                SELECT {selected_columns}
-                FROM (
-                    SELECT {selected_columns},
-                           ROW_NUMBER() OVER (
-                                ORDER BY {quote_identifier(self.pk_column)}
-                            ) AS rn
-                    FROM {self.full_table_name()}
-                ) t
-                WHERE rn > {start} AND rn <= {end}
-            """
+            return (
+                f"SELECT {selected_columns} "
+                "FROM ( "
+                f"SELECT {selected_columns}, "
+                "ROW_NUMBER() OVER ("
+                f"ORDER BY {quote_identifier(self.pk_column)}"
+                ") AS rn "
+                f"FROM {self.full_table_name()} "
+                ") t "
+                f"WHERE rn > {start} AND rn <= {end}"
+            )
         else:
             selected_columns = (
                 ", ".join(quote_identifier(c) for c in self.columns)
@@ -241,6 +265,175 @@ class Exporter(SqlServerIOBase):
                 FROM {self.full_table_name()}
                 WHERE ABS(CHECKSUM(*)) % {self.partition_count} = {n}
             """
+
+    def _pyodbc_type_code_to_pyarrow(self, type_code, precision, scale, internal_size):
+        if type_code in (pyodbc.SQL_TINYINT, pyodbc.SQL_SMALLINT, pyodbc.SQL_INTEGER):
+            return pa.int32()
+        if type_code == pyodbc.SQL_BIGINT:
+            return pa.int64()
+        if type_code in (pyodbc.SQL_REAL, pyodbc.SQL_FLOAT):
+            return pa.float32()
+        if type_code == pyodbc.SQL_DOUBLE:
+            return pa.float64()
+        if type_code in (pyodbc.SQL_DECIMAL, pyodbc.SQL_NUMERIC):
+            precision = precision or 38
+            scale = scale or 0
+            return pa.decimal128(precision, scale)
+        if type_code in (
+            pyodbc.SQL_CHAR,
+            pyodbc.SQL_VARCHAR,
+            pyodbc.SQL_LONGVARCHAR,
+            pyodbc.SQL_WCHAR,
+            pyodbc.SQL_WVARCHAR,
+            pyodbc.SQL_WLONGVARCHAR,
+        ):
+            return pa.string()
+        if type_code in (
+            pyodbc.SQL_BINARY,
+            pyodbc.SQL_VARBINARY,
+            pyodbc.SQL_LONGVARBINARY,
+        ):
+            return pa.binary()
+        if type_code == pyodbc.SQL_BIT:
+            return pa.bool_()
+        if type_code == pyodbc.SQL_TYPE_DATE:
+            return pa.date32()
+        if type_code == pyodbc.SQL_TYPE_TIME:
+            return pa.time64("us")
+        if type_code == pyodbc.SQL_TYPE_TIMESTAMP:
+            return pa.timestamp("us")
+        return pa.string()
+
+    def _pyodbc_schema_from_description(self, description):
+        fields = []
+        for column in description:
+            name = column[0]
+            type_code = column[1]
+            precision = column[5] if len(column) > 5 else None
+            scale = column[6] if len(column) > 6 else None
+            nullable = column[6] if len(column) > 6 else True
+            fields.append(
+                pa.field(
+                    name,
+                    self._pyodbc_type_code_to_pyarrow(
+                        type_code,
+                        precision,
+                        scale,
+                        column[3] if len(column) > 3 else None,
+                    ),
+                    nullable=nullable,
+                )
+            )
+        return pa.schema(fields)
+
+    def _export_partition_with_duckdb(self, query, filepath, filename):
+        with self.connection_d() as c:
+            try:
+                c.execute(f"""
+                    COPY (
+                        FROM odbc_query('{self.dsn}', $$ {query} $$)
+                    )
+                    TO '{str(filepath).replace('\\', '/')}'
+                    (
+                        FORMAT parquet,
+                        COMPRESSION snappy,
+                        ROW_GROUP_SIZE {self.rowgroup_size}
+                    )
+                """)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed exporting {filename}: {self.safe_error_message(e)}"
+                ) from e
+
+    def _export_partition_with_pyodbc(self, query, filepath, filename):
+        with self.connection_p() as conn:
+            with conn.cursor() as cur:
+                try:
+                    cur.execute(query)
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed exporting {filename}: {self.safe_error_message(e)}"
+                    ) from e
+
+                if cur.description is None:
+                    raise RuntimeError(
+                        f"Failed exporting {filename}: query returned no column "
+                        "metadata"
+                    )
+
+                columns = [desc[0] for desc in cur.description]
+                fetch_size = self.fetch_size
+
+                # Read first non-empty batch to infer a stable schema
+                try:
+                    first_rows = cur.fetchmany(fetch_size)
+                    if not first_rows:
+                        # No rows: create an empty file with string columns
+                        empty_schema = pa.schema(
+                            [pa.field(c, pa.string()) for c in columns]
+                        )
+                        with pq.ParquetWriter(
+                            str(filepath.as_posix()), empty_schema, compression="snappy"
+                        ) as writer:
+                            writer.write_table(
+                                pa.Table.from_pydict(
+                                    {c: [] for c in columns}, schema=empty_schema
+                                )
+                            )
+                        return
+
+                    batch_dicts = [
+                        dict(zip(columns, row, strict=True)) for row in first_rows
+                    ]
+                    target_schema = pa.Table.from_pylist(batch_dicts).schema
+
+                    def _rows_to_table(rows_to_write):
+                        batch = [
+                            dict(zip(columns, row, strict=True))
+                            for row in rows_to_write
+                        ]
+                        tbl = pa.Table.from_pylist(batch)
+                        if tbl.schema != target_schema:
+                            arrays = []
+                            for field in target_schema:
+                                name = field.name
+                                col_type = field.type
+                                vals = [r.get(name) for r in batch]
+                                arrays.append(pa.array(vals, type=col_type))
+                            tbl = pa.Table.from_arrays(
+                                arrays, names=[f.name for f in target_schema]
+                            )
+                        return tbl
+
+                    with pq.ParquetWriter(
+                        str(filepath.as_posix()), target_schema, compression="snappy"
+                    ) as writer:
+                        buffered_rows = list(first_rows)
+
+                        while True:
+                            if len(buffered_rows) >= self.rowgroup_size:
+                                rows_to_write = buffered_rows[: self.rowgroup_size]
+                                writer.write_table(
+                                    _rows_to_table(rows_to_write),
+                                    row_group_size=self.rowgroup_size,
+                                )
+                                buffered_rows = buffered_rows[self.rowgroup_size :]
+                                continue
+
+                            rows = cur.fetchmany(fetch_size)
+                            if not rows:
+                                break
+                            buffered_rows.extend(rows)
+
+                        if buffered_rows:
+                            writer.write_table(
+                                _rows_to_table(buffered_rows),
+                                row_group_size=self.rowgroup_size,
+                            )
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed exporting {filename}: {self.safe_error_message(e)}"
+                    ) from e
 
     def export_partition(self, n):
         thread_id = threading.get_ident()
@@ -255,28 +448,15 @@ class Exporter(SqlServerIOBase):
             f"Thread={thread_id} "
             f"Exporting file={filename} "
             f"partition={n}/{self.partition_count-1} "
-            f"table={self.schema}.{self.table}"
+            f"table={self.schema}.{self.table} "
+            f"engine={self.engine}"
         )
 
         def _work():
-            with self.connection_d() as c:
-
-                try:
-                    c.execute(f"""
-                        COPY (
-                            FROM odbc_query('{self.dsn}', $$ {query} $$)
-                        )
-                        TO '{str(filepath).replace("\\", "/")}'
-                        (
-                            FORMAT parquet,
-                            COMPRESSION snappy,
-                            ROW_GROUP_SIZE {self.rowgroup_size}
-                        )
-                    """)
-                except Exception as e:
-                    raise RuntimeError(
-                        f"Failed exporting {filename}: {self.safe_error_message(e)}"
-                    ) from e
+            if self.engine == "duckdb":
+                self._export_partition_with_duckdb(query, filepath, filename)
+            else:
+                self._export_partition_with_pyodbc(query, filepath, filename)
 
         self.retry(_work, context=f"Export partition {n}")
 
@@ -335,6 +515,7 @@ class Importer(SqlServerIOBase):
         worker_count=1,
         batch_size=1_000,
         transaction_mode: TransactionMode = TransactionMode.BATCH,
+        engine="pyodbc",
     ):
         super().__init__(config)
 
@@ -348,6 +529,9 @@ class Importer(SqlServerIOBase):
             if isinstance(transaction_mode, str)
             else transaction_mode
         )
+        if engine not in ENGINE_CHOICES:
+            raise ValueError(f"engine must be one of {sorted(ENGINE_CHOICES)}")
+        self.engine = engine
 
     def load_manifest(self):
         manifest_file = self.input_path / self.manifest_filename
@@ -415,12 +599,17 @@ class Importer(SqlServerIOBase):
             if self.transaction_mode == TransactionMode.FILE:
                 # For FILE mode, wrap entire operation in retry logic
                 def _file_operation():
+                    if self.engine == "duckdb":
+                        return self._import_file_with_duckdb(filepath, filename, start)
                     return self._import_file_impl(filepath, filename, start)
 
                 self.retry(_file_operation, context=f"Import file {filename}")
             else:
                 # For BATCH, ROWGROUP, and ROW modes, retries happen at granular level
-                self._import_file_impl(filepath, filename, start)
+                if self.engine == "duckdb":
+                    self._import_file_with_duckdb(filepath, filename, start)
+                else:
+                    self._import_file_impl(filepath, filename, start)
         except Exception as e:
             logging.error(f"Failed importing {filename}: {self.safe_error_message(e)}")
             raise
@@ -499,6 +688,78 @@ class Importer(SqlServerIOBase):
                     f"{time.time() - start:.2f}s"
                 )
 
+    def _load_parquet_with_duckdb(self, filepath):
+        with self.connection_d() as dconn:
+            sanitized_path = str(filepath.as_posix()).replace("'", "''")
+            return dconn.execute(
+                f"SELECT * FROM read_parquet('{sanitized_path}')"
+            ).fetch_arrow_table()
+
+    def _import_file_with_duckdb(self, filepath, filename, start):
+        with self.connection_p(
+            autocommit=(self.transaction_mode == TransactionMode.ROW)
+        ) as c:
+            with c.cursor() as cur:
+                cur.fast_executemany = True
+                if self.transaction_mode == TransactionMode.ROWGROUP:
+                    parquet_file = pq.ParquetFile(filepath)
+                    columns = parquet_file.schema.names
+                else:
+                    parquet_table = self._load_parquet_with_duckdb(filepath)
+                    columns = parquet_table.schema.names
+
+                table_columns = self.get_table_columns(cur)
+                self.validate_schema(columns, table_columns, filename)
+                column_list = ", ".join(quote_identifier(col) for col in columns)
+                placeholders = ", ".join("?" for _ in columns)
+
+                insert_sql = f"""
+                    INSERT INTO {self.full_table_name()} ({column_list})
+                    VALUES ({placeholders})
+                """
+
+                total_rows = 0
+
+                if self.transaction_mode == TransactionMode.ROWGROUP:
+                    for rg_idx in range(parquet_file.num_row_groups):
+                        rowgroup_table = parquet_file.read_row_group(rg_idx)
+                        rows_in_rg = self._import_rowgroup_with_retry(
+                            c,
+                            cur,
+                            rowgroup_table,
+                            insert_sql,
+                            filename,
+                            rg_idx,
+                            parquet_file.num_row_groups,
+                        )
+                        total_rows += rows_in_rg
+                else:
+                    for batch in parquet_table.to_batches(
+                        max_chunksize=self.batch_size
+                    ):
+                        if self.transaction_mode == TransactionMode.BATCH:
+                            rows_in_batch = self._import_batch_with_retry(
+                                c, cur, batch, insert_sql, filename
+                            )
+                            total_rows += rows_in_batch
+                        else:
+                            rows = list(
+                                zip(
+                                    *[col.to_pylist() for col in batch.columns],
+                                    strict=True,
+                                )
+                            )
+                            cur.executemany(insert_sql, rows)
+                            total_rows += len(rows)
+
+                if self.transaction_mode == TransactionMode.FILE:
+                    c.commit()
+
+                logging.info(
+                    f"Completed file={filename}, total rows: {total_rows}, in "
+                    f"{time.time() - start:.2f}s"
+                )
+
     def _import_batch_with_retry(self, c, cur, batch, insert_sql, filename):
         """Import a single batch with retry logic for BATCH mode."""
         rows = list(zip(*[col.to_pylist() for col in batch.columns], strict=True))
@@ -525,13 +786,20 @@ class Importer(SqlServerIOBase):
                     ) from None
 
     def _import_rowgroup_with_retry(
-        self, c, cur, table, insert_sql, filename, rg_idx, total_rg
+        self, c, cur, table_or_batch, insert_sql, filename, rg_idx, total_rg
     ):
         """Import a single row group with retry logic for ROWGROUP mode."""
         for attempt in range(self.config.retries):
             try:
                 total_rows = 0
-                for batch in table.to_batches(max_chunksize=self.batch_size):
+                to_batches = getattr(table_or_batch, "to_batches", None)
+                rowgroup_batches = (
+                    table_or_batch.to_batches(max_chunksize=self.batch_size)
+                    if callable(to_batches)
+                    else [table_or_batch]
+                )
+
+                for batch in rowgroup_batches:
                     rows = list(
                         zip(*[col.to_pylist() for col in batch.columns], strict=True)
                     )

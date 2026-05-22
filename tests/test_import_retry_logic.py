@@ -13,6 +13,8 @@ Covers:
 import time
 from unittest.mock import MagicMock, patch
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from pybutt.core import Importer, SqlConfig, TransactionMode
@@ -290,6 +292,38 @@ class TestRowGroupModeRetry:
         mock_connection.commit.assert_called_once()
         mock_connection.rollback.assert_not_called()
 
+    def test_import_file_with_duckdb_rowgroup_uses_actual_parquet_row_groups(
+        self, tmp_path, mock_config
+    ):
+        """Verify DuckDB ROWGROUP mode respects parquet row group boundaries."""
+        importer = Importer(
+            config=mock_config,
+            input_path=tmp_path,
+            manifest_filename="manifest.json",
+            batch_size=1000,
+            transaction_mode=TransactionMode.ROWGROUP,
+            engine="duckdb",
+        )
+
+        table = pa.table({"col1": [1, 2, 3, 4]})
+        parquet_file = tmp_path / "test.parquet"
+        pq.write_table(table, parquet_file, row_group_size=2)
+
+        mock_connection = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.description = [("col1",)]
+        mock_connection.cursor.return_value.__enter__.return_value = mock_cursor
+        mock_connection.__enter__.return_value = mock_connection
+        mock_connection.__exit__.return_value = None
+
+        importer.get_table_columns = lambda cur: ["col1"]
+
+        with patch.object(importer, "connection_p", return_value=mock_connection):
+            importer._import_file_with_duckdb(parquet_file, "test.parquet", time.time())
+
+        assert mock_connection.commit.call_count == 2
+        assert mock_cursor.executemany.call_count == 2
+
     def test_rowgroup_retry_fails_then_succeeds(self, importer_rowgroup_mode):
         """Test that rowgroup retries and succeeds on second attempt."""
         mock_connection = MagicMock()
@@ -358,6 +392,29 @@ class TestRowGroupModeRetry:
         # Rollback happens on first 2 failures,
         # not on the final attempt (where we raise)
         assert mock_connection.rollback.call_count == 2
+
+    def test_rowgroup_retry_accepts_recordbatch(self, importer_rowgroup_mode):
+        """Test that ROWGROUP retry works when passed a RecordBatch-like object."""
+        mock_connection = MagicMock()
+        mock_cursor = MagicMock()
+        mock_recordbatch = MagicMock()
+        mock_recordbatch.to_batches = None
+        mock_recordbatch.columns = [MagicMock()]
+        mock_recordbatch.columns[0].to_pylist.return_value = [1, 2]
+
+        rows_returned = importer_rowgroup_mode._import_rowgroup_with_retry(
+            mock_connection,
+            mock_cursor,
+            mock_recordbatch,
+            "INSERT INTO [dbo].[MyTable] (col1) VALUES (?)",
+            "test_file.parquet",
+            rg_idx=0,
+            total_rg=1,
+        )
+
+        assert rows_returned == 2
+        mock_cursor.executemany.assert_called_once()
+        mock_connection.commit.assert_called_once()
 
 
 class TestFileModeRetry:

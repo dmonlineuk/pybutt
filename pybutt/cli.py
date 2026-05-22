@@ -174,6 +174,23 @@ def export(
         help="Number of rows per rowgroup in the Parquet files.",
         min=1,
     ),
+    fetch_size: int | None = typer.Option(  # noqa: B008
+        None,
+        "--fetch-size",
+        "-fs",
+        help=(
+            "Cursor fetch size for pyodbc export. "
+            "Defaults to min(max(1024, rowgroup_size), 8192)."
+        ),
+        min=1,
+    ),
+    engine: str = typer.Option(  # noqa: B008
+        "duckdb",
+        "--engine",
+        "-E",
+        help="Export engine to use: duckdb or pyodbc.",
+        case_sensitive=False,
+    ),
     verbose: bool = typer.Option(  # noqa: B008
         False,
         "--verbose",
@@ -212,6 +229,8 @@ def export(
         worker_count=worker_count,
         file_count=file_count,
         rowgroup_size=rowgroup_size,
+        fetch_size=fetch_size,
+        engine=engine.lower(),
     )
     exporter.perform_work()
     typer.secho("Export completed successfully.", fg=typer.colors.GREEN)
@@ -312,6 +331,13 @@ def import_data(
         "-v",
         help="Show verbose logging output.",
     ),
+    engine: str = typer.Option(  # noqa: B008
+        "pyodbc",
+        "--engine",
+        "-E",
+        help="Import engine to use: duckdb or pyodbc.",
+        case_sensitive=False,
+    ),
     transaction_mode: TransactionMode = typer.Option(  # noqa: B008
         TransactionMode.BATCH,
         "--transaction-mode",
@@ -352,6 +378,7 @@ def import_data(
         worker_count=worker_count,
         batch_size=batch_size,
         transaction_mode=transaction_mode,
+        engine=engine.lower(),
     )
     importer.perform_work()
     typer.secho("Import completed successfully.", fg=typer.colors.GREEN)
