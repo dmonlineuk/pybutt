@@ -695,8 +695,13 @@ class Importer(SqlServerIOBase):
         ) as c:
             with c.cursor() as cur:
                 cur.fast_executemany = True
-                parquet_table = self._load_parquet_with_duckdb(filepath)
-                columns = parquet_table.schema.names
+                if self.transaction_mode == TransactionMode.ROWGROUP:
+                    parquet_file = pq.ParquetFile(filepath)
+                    columns = parquet_file.schema.names
+                else:
+                    parquet_table = self._load_parquet_with_duckdb(filepath)
+                    columns = parquet_table.schema.names
+
                 table_columns = self.get_table_columns(cur)
                 self.validate_schema(columns, table_columns, filename)
                 column_list = ", ".join(quote_identifier(col) for col in columns)
@@ -710,18 +715,16 @@ class Importer(SqlServerIOBase):
                 total_rows = 0
 
                 if self.transaction_mode == TransactionMode.ROWGROUP:
-                    batches = list(
-                        parquet_table.to_batches(max_chunksize=self.batch_size)
-                    )
-                    for rg_idx, batch in enumerate(batches):
+                    for rg_idx in range(parquet_file.num_row_groups):
+                        rowgroup_table = parquet_file.read_row_group(rg_idx)
                         rows_in_rg = self._import_rowgroup_with_retry(
                             c,
                             cur,
-                            batch,
+                            rowgroup_table,
                             insert_sql,
                             filename,
                             rg_idx,
-                            len(batches),
+                            parquet_file.num_row_groups,
                         )
                         total_rows += rows_in_rg
                 else:
@@ -777,13 +780,20 @@ class Importer(SqlServerIOBase):
                     ) from None
 
     def _import_rowgroup_with_retry(
-        self, c, cur, table, insert_sql, filename, rg_idx, total_rg
+        self, c, cur, table_or_batch, insert_sql, filename, rg_idx, total_rg
     ):
         """Import a single row group with retry logic for ROWGROUP mode."""
         for attempt in range(self.config.retries):
             try:
                 total_rows = 0
-                for batch in table.to_batches(max_chunksize=self.batch_size):
+                to_batches = getattr(table_or_batch, "to_batches", None)
+                rowgroup_batches = (
+                    table_or_batch.to_batches(max_chunksize=self.batch_size)
+                    if callable(to_batches)
+                    else [table_or_batch]
+                )
+
+                for batch in rowgroup_batches:
                     rows = list(
                         zip(*[col.to_pylist() for col in batch.columns], strict=True)
                     )
