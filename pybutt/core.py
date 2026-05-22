@@ -385,45 +385,51 @@ class Exporter(SqlServerIOBase):
                     batch_dicts = [
                         dict(zip(columns, row, strict=True)) for row in first_rows
                     ]
-                    first_table = pa.Table.from_pylist(batch_dicts)
-                    target_schema = first_table.schema
+                    target_schema = pa.Table.from_pylist(batch_dicts).schema
+
+                    def _rows_to_table(rows_to_write):
+                        batch = [
+                            dict(zip(columns, row, strict=True))
+                            for row in rows_to_write
+                        ]
+                        tbl = pa.Table.from_pylist(batch)
+                        if tbl.schema != target_schema:
+                            arrays = []
+                            for field in target_schema:
+                                name = field.name
+                                col_type = field.type
+                                vals = [r.get(name) for r in batch]
+                                arrays.append(pa.array(vals, type=col_type))
+                            tbl = pa.Table.from_arrays(
+                                arrays, names=[f.name for f in target_schema]
+                            )
+                        return tbl
 
                     with pq.ParquetWriter(
                         str(filepath.as_posix()), target_schema, compression="snappy"
                     ) as writer:
-                        writer.write_table(
-                            first_table, row_group_size=self.rowgroup_size
-                        )
+                        buffered_rows = list(first_rows)
 
-                        # Stream remaining rows and coerce to target schema
                         while True:
+                            if len(buffered_rows) >= self.rowgroup_size:
+                                rows_to_write = buffered_rows[: self.rowgroup_size]
+                                writer.write_table(
+                                    _rows_to_table(rows_to_write),
+                                    row_group_size=self.rowgroup_size,
+                                )
+                                buffered_rows = buffered_rows[self.rowgroup_size :]
+                                continue
+
                             rows = cur.fetchmany(fetch_size)
                             if not rows:
                                 break
-                            batch = [
-                                dict(zip(columns, row, strict=True)) for row in rows
-                            ]
-                            try:
-                                tbl = pa.Table.from_pylist(batch)
-                                if tbl.schema != target_schema:
-                                    # Coerce each column to the target type
-                                    arrays = []
-                                    for field in target_schema:
-                                        name = field.name
-                                        col_type = field.type
-                                        vals = [r.get(name) for r in batch]
-                                        arrays.append(pa.array(vals, type=col_type))
-                                    tbl = pa.Table.from_arrays(
-                                        arrays, names=[f.name for f in target_schema]
-                                    )
-                                writer.write_table(
-                                    tbl, row_group_size=self.rowgroup_size
-                                )
-                            except Exception as e:
-                                raise RuntimeError(
-                                    f"Failed exporting {filename}: "
-                                    f"{self.safe_error_message(e)}"
-                                ) from e
+                            buffered_rows.extend(rows)
+
+                        if buffered_rows:
+                            writer.write_table(
+                                _rows_to_table(buffered_rows),
+                                row_group_size=self.rowgroup_size,
+                            )
                 except Exception as e:
                     raise RuntimeError(
                         f"Failed exporting {filename}: {self.safe_error_message(e)}"
