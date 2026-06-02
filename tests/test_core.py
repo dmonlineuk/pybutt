@@ -10,7 +10,7 @@ from pybutt.core.config import (
     quote_identifier,
     validate_identifier,
 )
-from pybutt.exceptions import InvalidIdentifierError
+from pybutt.exceptions import InvalidIdentifierError, MissingManifestEntryError
 from pybutt.io.exporter import Exporter
 from pybutt.io.importer import Importer
 
@@ -277,7 +277,11 @@ def test_importer_load_manifest(tmp_path):
         manifest_filename="manifest.json",
     )
     result = importer.load_manifest()
-    assert result == files
+    assert result == {
+        "version": 1,
+        "type": "files",
+        "entries": files,
+    }
 
 
 def test_importer_load_manifest_missing_file(tmp_path):
@@ -298,8 +302,8 @@ def test_importer_load_manifest_missing_file(tmp_path):
         input_path=input_path,
         manifest_filename="manifest.json",
     )
-    with pytest.raises(FileNotFoundError, match="Missing file"):
-        importer.load_manifest()
+    with pytest.raises(MissingManifestEntryError, match="Missing file"):
+        importer.load_manifest_entries()
 
 
 def test_importer_validate_schema_mismatch():

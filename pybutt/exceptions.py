@@ -34,6 +34,14 @@ class DuplicateManifestEntryError(InvalidManifestError):
     """Raised when a manifest contains duplicate file entries."""
 
 
+class UnsupportedManifestVersionError(InvalidManifestError):
+    """Raised when a manifest has an unsupported version."""
+
+
+class UnsupportedManifestTypeError(InvalidManifestError):
+    """Raised when a manifest type is not supported."""
+
+
 class MissingManifestEntryError(FileNotFoundError, InvalidManifestError):
     """Raised when a manifest references a missing Parquet file."""
 
