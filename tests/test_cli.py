@@ -2,8 +2,8 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from pybutt import cli
-from pybutt.core import TransactionMode
+from pybutt.cli import cli
+from pybutt.core.config import TransactionMode
 
 runner = CliRunner()
 

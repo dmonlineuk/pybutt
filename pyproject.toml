@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-pybutt = "pybutt.cli:app"
+pybutt = "pybutt.cli.cli:app"
 
 [tool.black]
 line-length = 88
