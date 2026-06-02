@@ -10,6 +10,7 @@ from pybutt.core.config import (
     quote_identifier,
     validate_identifier,
 )
+from pybutt.exceptions import InvalidIdentifierError
 from pybutt.io.exporter import Exporter
 from pybutt.io.importer import Importer
 
@@ -19,7 +20,7 @@ def test_validate_identifier_valid():
 
 
 def test_validate_identifier_invalid():
-    with pytest.raises(ValueError, match="Invalid identifier"):
+    with pytest.raises(InvalidIdentifierError, match="Invalid identifier"):
         validate_identifier("123invalid")
 
 

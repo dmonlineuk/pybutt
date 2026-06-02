@@ -4,20 +4,51 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from pybutt.exceptions import (
+    DuplicateManifestEntryError,
+    InvalidManifestEntryError,
+    InvalidManifestError,
+    ManifestNotFoundError,
+    MissingManifestEntryError,
+)
+
 
 def load_manifest(manifest_path: str | Path) -> list[str]:
     manifest_path = Path(manifest_path)
 
     if not manifest_path.exists():
-        raise FileNotFoundError(f"Manifest not found: {manifest_path}")
+        raise ManifestNotFoundError(f"Manifest not found: {manifest_path}")
 
     with open(manifest_path) as f:
         data = json.load(f)
 
     if not isinstance(data, list):
-        raise ValueError("Manifest must be a list of filenames")
+        raise InvalidManifestError("Manifest must be a list of filenames")
 
     return data
+
+
+def validate_manifest_entries(files: list[str], base_dir: Path) -> list[str]:
+    seen = set()
+    validated = []
+
+    for item in files:
+        if not isinstance(item, str):
+            raise InvalidManifestEntryError(
+                f"Invalid manifest entry (not string): {item}"
+            )
+
+        if item in seen:
+            raise DuplicateManifestEntryError(f"Duplicate file in manifest: {item}")
+
+        filepath = base_dir / item
+        if not filepath.exists():
+            raise MissingManifestEntryError(f"Missing file: {filepath}")
+
+        seen.add(item)
+        validated.append(item)
+
+    return validated
 
 
 def inspect_parquet_file(filepath: Path, verbose: bool = False) -> dict:

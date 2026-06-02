@@ -2,6 +2,8 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
+from pybutt.exceptions import InvalidIdentifierError
+
 ENGINE_CHOICES = frozenset({"duckdb", "pyodbc"})
 
 
@@ -19,7 +21,7 @@ IDENTIFIER_REGEX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 def validate_identifier(name: str) -> str:
     if not IDENTIFIER_REGEX.match(name):
-        raise ValueError(f"Invalid identifier: {name}")
+        raise InvalidIdentifierError(f"Invalid identifier: {name}")
     return name
 
 

@@ -1,17 +1,19 @@
 import json
-from pathlib import Path
 
-import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
+from pybutt.exceptions import DuplicateManifestEntryError
 from pybutt.files.files import (
     inspect_manifest,
     inspect_parquet_file,
+    load_manifest,
     rewrite_parquet_files,
+    validate_manifest_entries,
 )
 
 
-def test_inspect_parquet_file_basic(tmp_path):
+def test_inspect_parquet_file_basic(tmp_path, create_parquet):
     file_path = create_parquet(tmp_path, "test.parquet", rows=9, rowgroup_size=5)
 
     info = inspect_parquet_file(file_path)
@@ -22,7 +24,7 @@ def test_inspect_parquet_file_basic(tmp_path):
     assert info["row_group_sizes"] == {5, 4}
 
 
-def test_inspect_parquet_file_verbose(tmp_path):
+def test_inspect_parquet_file_verbose(tmp_path, create_parquet):
     file_path = create_parquet(tmp_path, "test.parquet")
 
     info = inspect_parquet_file(file_path, verbose=True)
@@ -32,7 +34,7 @@ def test_inspect_parquet_file_verbose(tmp_path):
     assert info["columns"]["value"] == "string"
 
 
-def test_inspect_manifest(tmp_path, capsys):
+def test_inspect_manifest(tmp_path, capsys, create_parquet):
     # Create two parquet files
     create_parquet(tmp_path, "a.parquet", rows=6, rowgroup_size=3)
     create_parquet(tmp_path, "b.parquet", rows=4, rowgroup_size=2)
@@ -51,19 +53,7 @@ def test_inspect_manifest(tmp_path, capsys):
     assert "b.parquet" in out
 
 
-def create_parquet(tmp_path: Path, name: str, rows: int = 9, rowgroup_size: int = 5):
-    data = {
-        "id": list(range(rows)),
-        "value": [f"v{i}" for i in range(rows)],
-    }
-    table = pa.Table.from_pydict(data)
-
-    file_path = tmp_path / name
-    pq.write_table(table, file_path, row_group_size=rowgroup_size)
-    return file_path
-
-
-def test_rewrite_default_outdir(tmp_path):
+def test_rewrite_default_outdir(tmp_path, create_parquet):
     # Create original parquet
     create_parquet(tmp_path, "data.parquet", rows=12, rowgroup_size=3)
 
@@ -93,3 +83,20 @@ def test_rewrite_default_outdir(tmp_path):
     # Validate rowgroup size
     pf = pq.ParquetFile(new_file)
     assert pf.metadata.num_row_groups == 2
+
+
+def test_validate_manifest_entries_rejects_duplicates(tmp_path, create_parquet):
+    create_parquet(tmp_path, "a.parquet")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('["a.parquet", "a.parquet"]')
+
+    with pytest.raises(DuplicateManifestEntryError, match="Duplicate file in manifest"):
+        validate_manifest_entries(load_manifest(manifest), tmp_path)
+
+
+def test_validate_manifest_entries_rejects_missing_file(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('["missing.parquet"]')
+
+    with pytest.raises(FileNotFoundError, match="Missing file"):
+        validate_manifest_entries(load_manifest(manifest), tmp_path)

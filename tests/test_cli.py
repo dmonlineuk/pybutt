@@ -1,8 +1,6 @@
 import json
 from pathlib import Path
 
-import pyarrow as pa
-import pyarrow.parquet as pq
 from typer.testing import CliRunner
 
 from pybutt.cli import cli
@@ -471,19 +469,7 @@ class TestTransactionModeCliParameter:
         assert "[default: batch]" in result.output.lower()
 
 
-def create_parquet(tmp_path: Path, name: str, rows: int = 10, rowgroup_size: int = 5):
-    data = {
-        "id": list(range(rows)),
-        "value": [f"v{i}" for i in range(rows)],
-    }
-    table = pa.Table.from_pydict(data)
-
-    file_path = tmp_path / name
-    pq.write_table(table, file_path, row_group_size=rowgroup_size)
-    return file_path
-
-
-def test_cli_files_inspect(tmp_path):
+def test_cli_files_inspect(tmp_path, create_parquet):
     create_parquet(tmp_path, "x.parquet", rows=8, rowgroup_size=4)
 
     manifest = tmp_path / "manifest.json"
@@ -498,7 +484,7 @@ def test_cli_files_inspect(tmp_path):
     assert "row groups: 2" in result.stdout
 
 
-def test_cli_files_inspect_verbose(tmp_path):
+def test_cli_files_inspect_verbose(tmp_path, create_parquet):
     create_parquet(tmp_path, "x.parquet")
 
     manifest = tmp_path / "manifest.json"
