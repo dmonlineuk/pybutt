@@ -1,18 +1,28 @@
 from __future__ import annotations
 
 import getpass
+import json
 import logging
 from pathlib import Path
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import typer
+from typer.testing import CliRunner
 
 from pybutt.core.config import (
     SqlConfig,
     TransactionMode,
 )
-from pybutt.files.files import inspect_manifest
+from pybutt.files.files import (
+    inspect_manifest,
+    rewrite_parquet_files,
+)
 from pybutt.io.exporter import Exporter
 from pybutt.io.importer import Importer
+
+runner = CliRunner()
+
 
 app = typer.Typer(
     context_settings={"help_option_names": ["-?", "--help"]},
@@ -401,6 +411,75 @@ def inspect_command(
     Inspect parquet files listed in a manifest.
     """
     inspect_manifest(manifest, verbose)
+
+
+@app.command("rewrite")
+def rewrite_command(
+    manifest: Path = typer.Argument(...),  # noqa: B008
+    outdir: Path = typer.Option(  # noqa: B008
+        None, "--outdir", "-o", help="Output directory"
+    ),
+    rowgroup_size: int = typer.Option(..., "--rowgroup-size", "-r"),  # noqa: B008
+    new_manifest: str = typer.Option(  # noqa: B008
+        "manifest_new.json", "--new-manifest", "-n"
+    ),
+    delete_originals: bool = typer.Option(
+        False, "--delete-originals", "-d"
+    ),  # noqa: B008
+):
+    """
+    Rewrite parquet files with a new row-group size.
+    """
+    rewrite_parquet_files(
+        manifest,
+        outdir,
+        rowgroup_size,
+        new_manifest,
+        delete_originals,
+    )
+
+
+def create_parquet(tmp_path: Path, name: str, rows=10, rowgroup_size=5):
+    data = {
+        "id": list(range(rows)),
+        "value": [f"v{i}" for i in range(rows)],
+    }
+    table = pa.Table.from_pydict(data)
+    file_path = tmp_path / name
+    pq.write_table(table, file_path, row_group_size=rowgroup_size)
+    return file_path
+
+
+def test_cli_rewrite_default_outdir(tmp_path):
+    create_parquet(tmp_path, "x.parquet", rows=8, rowgroup_size=2)
+
+    manifest = tmp_path / "manifest.json"
+    with open(manifest, "w") as f:
+        json.dump(["x.parquet"], f)
+
+    result = runner.invoke(
+        app,
+        [
+            "files",
+            "rewrite",
+            str(manifest),
+            "--rowgroup-size",
+            "4",
+            "--new-manifest",
+            "manifest_new.json",
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    # Check new file exists
+    new_file = tmp_path / "x_new.parquet"
+    assert new_file.exists()
+
+    # Check manifest
+    with open(tmp_path / "manifest_new.json") as f:
+        files = json.load(f)
+    assert files == ["x_new.parquet"]
 
 
 if __name__ == "__main__":

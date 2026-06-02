@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 
@@ -63,3 +64,68 @@ def inspect_manifest(manifest_path: str | Path, verbose: bool = False):
                 print(f"    {col}: {typ}")
 
         print()
+
+
+def rewrite_single_file(
+    src_path: Path,
+    dst_path: Path,
+    new_rowgroup_size: int,
+):
+    """
+    Rewrite a single parquet file with a new row-group size.
+    Streaming: does not load entire file into memory.
+    """
+    pf = pq.ParquetFile(src_path)
+
+    # Create writer using the same schema
+    with pq.ParquetWriter(dst_path, pf.schema_arrow, compression="snappy") as writer:
+
+        for batch in pf.iter_batches(batch_size=new_rowgroup_size):
+            table = pa.Table.from_batches([batch])
+            writer.write_table(table)
+
+
+def rewrite_parquet_files(
+    manifest_path: Path,
+    output_dir: Path | None,
+    new_rowgroup_size: int,
+    new_manifest_name: str,
+    delete_originals: bool = False,
+):
+    """
+    Rewrite all parquet files listed in a manifest with a new row-group size.
+    """
+    manifest_path = Path(manifest_path)
+    base_dir = manifest_path.parent
+
+    if output_dir is None:
+        output_dir = base_dir
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    files = load_manifest(manifest_path)
+
+    new_files = []
+
+    for filename in files:
+        src = base_dir / filename
+        dst_name = f"{src.stem}_new{src.suffix}"
+        dst = output_dir / dst_name
+
+        rewrite_single_file(src, dst, new_rowgroup_size)
+        new_files.append(dst.name)
+
+        if delete_originals:
+            src.unlink()
+
+    # Write new manifest
+    new_manifest_path = output_dir / new_manifest_name
+    with open(new_manifest_path, "w") as f:
+        json.dump(new_files, f, indent=4)
+
+    return new_manifest_path
+
+
+if __name__ == "__main__":
+    pass

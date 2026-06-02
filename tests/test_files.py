@@ -7,19 +7,8 @@ import pyarrow.parquet as pq
 from pybutt.files.files import (
     inspect_manifest,
     inspect_parquet_file,
+    rewrite_parquet_files,
 )
-
-
-def create_parquet(tmp_path: Path, name: str, rows: int = 9, rowgroup_size: int = 5):
-    data = {
-        "id": list(range(rows)),
-        "value": [f"v{i}" for i in range(rows)],
-    }
-    table = pa.Table.from_pydict(data)
-
-    file_path = tmp_path / name
-    pq.write_table(table, file_path, row_group_size=rowgroup_size)
-    return file_path
 
 
 def test_inspect_parquet_file_basic(tmp_path):
@@ -60,3 +49,47 @@ def test_inspect_manifest(tmp_path, capsys):
     assert "rows: 6" in out
     assert "row groups: 2" in out
     assert "b.parquet" in out
+
+
+def create_parquet(tmp_path: Path, name: str, rows: int = 9, rowgroup_size: int = 5):
+    data = {
+        "id": list(range(rows)),
+        "value": [f"v{i}" for i in range(rows)],
+    }
+    table = pa.Table.from_pydict(data)
+
+    file_path = tmp_path / name
+    pq.write_table(table, file_path, row_group_size=rowgroup_size)
+    return file_path
+
+
+def test_rewrite_default_outdir(tmp_path):
+    # Create original parquet
+    create_parquet(tmp_path, "data.parquet", rows=12, rowgroup_size=3)
+
+    # Create manifest
+    manifest = tmp_path / "manifest.json"
+    with open(manifest, "w") as f:
+        json.dump(["data.parquet"], f)
+
+    # Rewrite without specifying outdir
+    new_manifest = rewrite_parquet_files(
+        manifest_path=manifest,
+        output_dir=None,
+        new_rowgroup_size=6,
+        new_manifest_name="manifest_new.json",
+        delete_originals=False,
+    )
+
+    # Check new file exists
+    new_file = tmp_path / "data_new.parquet"
+    assert new_file.exists()
+
+    # Check manifest content
+    with open(new_manifest) as f:
+        files = json.load(f)
+    assert files == ["data_new.parquet"]
+
+    # Validate rowgroup size
+    pf = pq.ParquetFile(new_file)
+    assert pf.metadata.num_row_groups == 2
