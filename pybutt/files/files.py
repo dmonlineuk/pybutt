@@ -27,8 +27,7 @@ def inspect_parquet_file(filepath: Path, verbose: bool = False) -> dict:
         "rows": pf.metadata.num_rows,
         "row_groups": pf.metadata.num_row_groups,
         "row_group_sizes": {
-            pf.metadata.row_group(i).num_rows 
-            for i in range(pf.metadata.num_row_groups)
+            pf.metadata.row_group(i).num_rows for i in range(pf.metadata.num_row_groups)
         },
     }
 

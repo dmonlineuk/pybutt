@@ -393,7 +393,9 @@ def import_data(
 @app.command("inspect")
 def inspect_command(
     manifest: Path = typer.Argument(..., help="Path to manifest.json"),  # noqa: B008
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show column details"),  # noqa: B008
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Show column details"
+    ),  # noqa: B008
 ):
     """
     Inspect parquet files listed in a manifest.
