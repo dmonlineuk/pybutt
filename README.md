@@ -319,7 +319,9 @@ Use PyButt as a module in your Python projects:
 First, create a `SqlConfig` object with your connection details:
 
 ```python
-from pybutt.core import SqlConfig, Exporter, Importer
+from pybutt.core.config import SqlConfig
+from pybutt.io.exporter import Exporter
+from pybutt.io.importer import Importer
 from pathlib import Path
 
 config = SqlConfig(
@@ -387,7 +389,7 @@ exporter.perform_work()
 
 **Default (batch-level transactions):**
 ```python
-from pybutt.core import TransactionMode
+from pybutt.core.config import TransactionMode
 
 importer = Importer(
     config=config,
@@ -448,7 +450,9 @@ importer.perform_work()
 
 ```python
 from pathlib import Path
-from pybutt.core import SqlConfig, Exporter, Importer, TransactionMode
+from pybutt.core.config import SqlConfig, TransactionMode
+from pybutt.io.exporter import Exporter
+from pybutt.io.importer import Importer
 
 # Configure connection
 config = SqlConfig(
