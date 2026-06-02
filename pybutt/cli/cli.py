@@ -10,6 +10,7 @@ from pybutt.core.config import (
     SqlConfig,
     TransactionMode,
 )
+from pybutt.files.files import inspect_manifest
 from pybutt.io.exporter import Exporter
 from pybutt.io.importer import Importer
 
@@ -387,6 +388,17 @@ def import_data(
     )
     importer.perform_work()
     typer.secho("Import completed successfully.", fg=typer.colors.GREEN)
+
+
+@app.command("inspect")
+def inspect_command(
+    manifest: Path = typer.Argument(..., help="Path to manifest.json"),  # noqa: B008
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show column details"),  # noqa: B008
+):
+    """
+    Inspect parquet files listed in a manifest.
+    """
+    inspect_manifest(manifest, verbose)
 
 
 if __name__ == "__main__":
