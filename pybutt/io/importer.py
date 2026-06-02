@@ -15,10 +15,10 @@ from pybutt.core.config import (
 )
 from pybutt.exceptions import (
     BatchImportError,
-    DataImportError,
     EngineSelectionError,
     RowGroupImportError,
     SchemaMismatchError,
+    UnsupportedManifestTypeError,
 )
 from pybutt.files.files import load_manifest, validate_manifest_entries
 
@@ -56,8 +56,15 @@ class Importer(SqlServerIOBase):
 
     def load_manifest(self):
         manifest_file = self.input_path / self.manifest_filename
-        files = load_manifest(manifest_file)
-        return validate_manifest_entries(files, self.input_path)
+        return load_manifest(manifest_file)
+
+    def load_manifest_entries(self):
+        manifest = self.load_manifest()
+        if manifest["type"] != "files":
+            raise UnsupportedManifestTypeError(
+                f"Importer only supports file manifests, got: {manifest['type']}"
+            )
+        return validate_manifest_entries(manifest, self.input_path)
 
     def _build_insert_sql(self, columns: list[str]) -> str:
         column_list = ", ".join(quote_identifier(col) for col in columns)
@@ -312,7 +319,7 @@ class Importer(SqlServerIOBase):
                     ) from None
 
     def perform_work(self):
-        filenames = self.load_manifest()
+        filenames = self.load_manifest_entries()
 
         with ThreadPoolExecutor(max_workers=self.worker_count) as executor:
             futures = [

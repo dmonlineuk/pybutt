@@ -388,7 +388,15 @@ class Exporter(SqlServerIOBase):
         logging.info(f"Writing manifest: {manifest_file}")
         try:
             with open(manifest_file, "w") as f:
-                j.dump(filenames, f, indent=4)
+                j.dump(
+                    {
+                        "version": 1,
+                        "type": "files",
+                        "entries": filenames,
+                    },
+                    f,
+                    indent=4,
+                )
             logging.info(
                 f"Manifest written: {manifest_file} " f"files={len(filenames)}"
             )

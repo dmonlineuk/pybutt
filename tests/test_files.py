@@ -3,7 +3,7 @@ import json
 import pyarrow.parquet as pq
 import pytest
 
-from pybutt.exceptions import DuplicateManifestEntryError
+from pybutt.exceptions import DuplicateManifestEntryError, MissingManifestEntryError
 from pybutt.files.files import (
     inspect_manifest,
     inspect_parquet_file,
@@ -77,8 +77,13 @@ def test_rewrite_default_outdir(tmp_path, create_parquet):
 
     # Check manifest content
     with open(new_manifest) as f:
-        files = json.load(f)
-    assert files == ["data_new.parquet"]
+        manifest = json.load(f)
+
+    assert manifest == {
+        "version": 1,
+        "type": "files",
+        "entries": ["data_new.parquet"],
+    }
 
     # Validate rowgroup size
     pf = pq.ParquetFile(new_file)
@@ -94,9 +99,47 @@ def test_validate_manifest_entries_rejects_duplicates(tmp_path, create_parquet):
         validate_manifest_entries(load_manifest(manifest), tmp_path)
 
 
+def test_load_manifest_legacy_list(tmp_path, create_parquet):
+    create_parquet(tmp_path, "a.parquet")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('["a.parquet"]')
+
+    result = load_manifest(manifest)
+    assert result == {
+        "version": 1,
+        "type": "files",
+        "entries": ["a.parquet"],
+    }
+
+
+def test_load_manifest_version1_object(tmp_path, create_parquet):
+    create_parquet(tmp_path, "a.parquet")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('{"version": 1, "type": "files", "entries": ["a.parquet"]}')
+
+    result = load_manifest(manifest)
+    assert result == {
+        "version": 1,
+        "type": "files",
+        "entries": ["a.parquet"],
+    }
+
+
+def test_load_manifest_version2_table_list(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('{"version": 2, "type": "tables", "entries": ["dbo.MyTable"]}')
+
+    result = load_manifest(manifest)
+    assert result == {
+        "version": 2,
+        "type": "tables",
+        "entries": ["dbo.MyTable"],
+    }
+
+
 def test_validate_manifest_entries_rejects_missing_file(tmp_path):
     manifest = tmp_path / "manifest.json"
     manifest.write_text('["missing.parquet"]')
 
-    with pytest.raises(FileNotFoundError, match="Missing file"):
+    with pytest.raises(MissingManifestEntryError, match="Missing file"):
         validate_manifest_entries(load_manifest(manifest), tmp_path)
