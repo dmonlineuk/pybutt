@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -466,3 +467,33 @@ class TestTransactionModeCliParameter:
         assert "transaction" in result.output.lower()
         assert "batch" in result.output.lower()
         assert "[default: batch]" in result.output.lower()
+
+
+def test_cli_files_inspect(tmp_path, create_parquet):
+    create_parquet(tmp_path, "x.parquet", rows=8, rowgroup_size=4)
+
+    manifest = tmp_path / "manifest.json"
+    with open(manifest, "w") as f:
+        json.dump(["x.parquet"], f)
+
+    result = runner.invoke(cli.app, ["inspect", str(manifest)])
+
+    assert result.exit_code == 0
+    assert "x.parquet" in result.stdout
+    assert "rows: 8" in result.stdout
+    assert "row groups: 2" in result.stdout
+
+
+def test_cli_files_inspect_verbose(tmp_path, create_parquet):
+    create_parquet(tmp_path, "x.parquet")
+
+    manifest = tmp_path / "manifest.json"
+    with open(manifest, "w") as f:
+        json.dump(["x.parquet"], f)
+
+    result = runner.invoke(cli.app, ["inspect", str(manifest), "--verbose"])
+
+    assert result.exit_code == 0
+    assert "columns:" in result.stdout
+    assert "id:" in result.stdout
+    assert "value:" in result.stdout

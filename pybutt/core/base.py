@@ -5,6 +5,8 @@ import time
 import duckdb as d
 import pyodbc
 
+from pybutt.exceptions import ConfigurationError, RetryExceededError
+
 from .config import (
     SqlConfig,
     quote_identifier,
@@ -36,7 +38,7 @@ class SqlServerIOBase:
             parts.append("Trusted_Connection=Yes")
         else:
             if not cfg.username or not cfg.password:
-                raise ValueError(
+                raise ConfigurationError(
                     "Username/password required when not using trusted connection"
                 )
             parts.append(f"Uid={cfg.username}")
@@ -85,11 +87,11 @@ class SqlServerIOBase:
                 )
                 time.sleep(2**attempt)
         if last_error is not None:
-            raise RuntimeError(
+            raise RetryExceededError(
                 f"{context} failed after max retries: "
                 f"{self.safe_error_message(last_error)}"
             ) from last_error
-        raise RuntimeError(f"{context} failed after max retries")
+        raise RetryExceededError(f"{context} failed after max retries")
 
 
 if __name__ == "__main__":

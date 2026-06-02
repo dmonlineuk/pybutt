@@ -1,4 +1,3 @@
-import json as j
 import logging
 import threading
 import time
@@ -14,6 +13,14 @@ from pybutt.core.config import (
     TransactionMode,
     quote_identifier,
 )
+from pybutt.exceptions import (
+    BatchImportError,
+    DataImportError,
+    EngineSelectionError,
+    RowGroupImportError,
+    SchemaMismatchError,
+)
+from pybutt.files.files import load_manifest, validate_manifest_entries
 
 logging.basicConfig(level=logging.INFO)
 
@@ -42,39 +49,31 @@ class Importer(SqlServerIOBase):
             else transaction_mode
         )
         if engine not in ENGINE_CHOICES:
-            raise ValueError(f"engine must be one of {sorted(ENGINE_CHOICES)}")
+            raise EngineSelectionError(
+                f"engine must be one of {sorted(ENGINE_CHOICES)}"
+            )
         self.engine = engine
 
     def load_manifest(self):
         manifest_file = self.input_path / self.manifest_filename
+        files = load_manifest(manifest_file)
+        return validate_manifest_entries(files, self.input_path)
 
-        if not manifest_file.exists():
-            raise FileNotFoundError(f"Manifest not found: {manifest_file}")
+    def _build_insert_sql(self, columns: list[str]) -> str:
+        column_list = ", ".join(quote_identifier(col) for col in columns)
+        placeholders = ", ".join("?" for _ in columns)
+        return (
+            f"INSERT INTO {self.full_table_name()} "
+            f"({column_list}) VALUES ({placeholders})"
+        )
 
-        with open(manifest_file) as f:
-            data = j.load(f)
+    def _rows_from_batch(self, batch):
+        return list(zip(*[col.to_pylist() for col in batch.columns], strict=True))
 
-        if not isinstance(data, list):
-            raise ValueError("Manifest must be a list of filenames")
-
-        seen = set()
-        validated = []
-
-        for item in data:
-            if not isinstance(item, str):
-                raise ValueError(f"Invalid manifest entry (not string): {item}")
-
-            if item in seen:
-                raise ValueError(f"Duplicate file in manifest: {item}")
-
-            filepath = self.input_path / item
-            if not filepath.exists():
-                raise FileNotFoundError(f"Missing file: {filepath}")
-
-            seen.add(item)
-            validated.append(item)
-
-        return validated
+    def _validate_and_build_insert(self, cur, columns, filename):
+        table_columns = self.get_table_columns(cur)
+        self.validate_schema(columns, table_columns, filename)
+        return self._build_insert_sql(columns)
 
     def get_table_columns(self, cur):
         cur.execute(f"SELECT TOP 0 * FROM {self.full_table_name()}")
@@ -88,7 +87,7 @@ class Importer(SqlServerIOBase):
             missing_in_sql = parquet_set - table_set
             missing_in_parquet = table_set - parquet_set
 
-            raise ValueError(
+            raise SchemaMismatchError(
                 f"Schema mismatch in {filename}:\n"
                 f"  Columns in parquet but not SQL: {missing_in_sql}\n"
                 f"  Columns in SQL but not parquet: {missing_in_parquet}"
@@ -138,15 +137,7 @@ class Importer(SqlServerIOBase):
                 cur.fast_executemany = True
                 parquet_file = pq.ParquetFile(filepath)
                 columns = parquet_file.schema.names
-                table_columns = self.get_table_columns(cur)
-                self.validate_schema(columns, table_columns, filename)
-                column_list = ", ".join(quote_identifier(col) for col in columns)
-                placeholders = ", ".join("?" for _ in columns)
-
-                insert_sql = f"""
-                    INSERT INTO {self.full_table_name()} ({column_list})
-                    VALUES ({placeholders})
-                """
+                insert_sql = self._validate_and_build_insert(cur, columns, filename)
 
                 total_rows = 0
 
@@ -154,7 +145,6 @@ class Importer(SqlServerIOBase):
                     table = parquet_file.read_row_group(rg_idx)
 
                     if self.transaction_mode == TransactionMode.ROWGROUP:
-                        # Wrap rowgroup processing in retry logic
                         rows_in_rg = self._import_rowgroup_with_retry(
                             c,
                             cur,
@@ -166,22 +156,15 @@ class Importer(SqlServerIOBase):
                         )
                         total_rows += rows_in_rg
                     else:
-                        # Process batches within the rowgroup
                         for batch in table.to_batches(max_chunksize=self.batch_size):
                             if self.transaction_mode == TransactionMode.BATCH:
-                                # Wrap batch processing in retry logic
+                                rows = self._rows_from_batch(batch)
                                 rows_in_batch = self._import_batch_with_retry(
-                                    c, cur, batch, insert_sql, filename
+                                    c, cur, rows, insert_sql, filename
                                 )
                                 total_rows += rows_in_batch
                             else:
-                                # ROW or FILE mode: just process the batch
-                                rows = list(
-                                    zip(
-                                        *[col.to_pylist() for col in batch.columns],
-                                        strict=True,
-                                    )
-                                )
+                                rows = self._rows_from_batch(batch)
                                 cur.executemany(insert_sql, rows)
                                 total_rows += len(rows)
 
@@ -220,15 +203,7 @@ class Importer(SqlServerIOBase):
                     parquet_table = self._load_parquet_with_duckdb(filepath)
                     columns = parquet_table.schema.names
 
-                table_columns = self.get_table_columns(cur)
-                self.validate_schema(columns, table_columns, filename)
-                column_list = ", ".join(quote_identifier(col) for col in columns)
-                placeholders = ", ".join("?" for _ in columns)
-
-                insert_sql = f"""
-                    INSERT INTO {self.full_table_name()} ({column_list})
-                    VALUES ({placeholders})
-                """
+                insert_sql = self._validate_and_build_insert(cur, columns, filename)
 
                 total_rows = 0
 
@@ -249,18 +224,13 @@ class Importer(SqlServerIOBase):
                     for batch in parquet_table.to_batches(
                         max_chunksize=self.batch_size
                     ):
+                        rows = self._rows_from_batch(batch)
                         if self.transaction_mode == TransactionMode.BATCH:
                             rows_in_batch = self._import_batch_with_retry(
-                                c, cur, batch, insert_sql, filename
+                                c, cur, rows, insert_sql, filename
                             )
                             total_rows += rows_in_batch
                         else:
-                            rows = list(
-                                zip(
-                                    *[col.to_pylist() for col in batch.columns],
-                                    strict=True,
-                                )
-                            )
                             cur.executemany(insert_sql, rows)
                             total_rows += len(rows)
 
@@ -272,9 +242,13 @@ class Importer(SqlServerIOBase):
                     f"{time.time() - start:.2f}s"
                 )
 
-    def _import_batch_with_retry(self, c, cur, batch, insert_sql, filename):
+    def _import_batch_with_retry(self, c, cur, rows_or_batch, insert_sql, filename):
         """Import a single batch with retry logic for BATCH mode."""
-        rows = list(zip(*[col.to_pylist() for col in batch.columns], strict=True))
+        rows = (
+            rows_or_batch
+            if isinstance(rows_or_batch, list)
+            else self._rows_from_batch(rows_or_batch)
+        )
 
         for attempt in range(self.config.retries):
             try:
@@ -292,7 +266,7 @@ class Importer(SqlServerIOBase):
                     c.rollback()
                     time.sleep(2**attempt)
                 else:
-                    raise RuntimeError(
+                    raise BatchImportError(
                         f"Batch import failed after {self.config.retries} retries: "
                         f"{safe_msg}"
                     ) from None
@@ -332,7 +306,7 @@ class Importer(SqlServerIOBase):
                     c.rollback()
                     time.sleep(2**attempt)
                 else:
-                    raise RuntimeError(
+                    raise RowGroupImportError(
                         f"Row group import failed after {self.config.retries} retries: "
                         f"{safe_msg}"
                     ) from None

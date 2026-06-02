@@ -17,6 +17,12 @@ from pybutt.core.config import (
     quote_identifier,
     validate_identifier,
 )
+from pybutt.exceptions import (
+    ConfigurationError,
+    DataExportError,
+    EngineSelectionError,
+    TableEmptyError,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -40,13 +46,15 @@ class Exporter(SqlServerIOBase):
         self.columns = [validate_identifier(c) for c in columns] if columns else None
 
         if engine not in ENGINE_CHOICES:
-            raise ValueError(f"engine must be one of {sorted(ENGINE_CHOICES)}")
+            raise EngineSelectionError(
+                f"engine must be one of {sorted(ENGINE_CHOICES)}"
+            )
 
         if file_count < 1:
-            raise ValueError("file_count must be at least 1")
+            raise ConfigurationError("file_count must be at least 1")
 
         if fetch_size is not None and fetch_size < 1:
-            raise ValueError("fetch_size must be at least 1")
+            raise ConfigurationError("fetch_size must be at least 1")
 
         self.worker_count = worker_count
         self.file_count = file_count
@@ -87,7 +95,7 @@ class Exporter(SqlServerIOBase):
         self.total_rows = self.retry(_work, context="Fetching partition strategy")
 
         if self.total_rows == 0:
-            raise RuntimeError("Table empty or not found")
+            raise TableEmptyError("Table empty or not found")
 
         self.partition_count = self.file_count
         self.chunk_size = m.ceil(self.total_rows / self.partition_count)
@@ -227,7 +235,7 @@ class Exporter(SqlServerIOBase):
                     )
                 """)
             except Exception as e:
-                raise RuntimeError(
+                raise DataExportError(
                     f"Failed exporting {filename}: {self.safe_error_message(e)}"
                 ) from e
 
@@ -237,12 +245,12 @@ class Exporter(SqlServerIOBase):
                 try:
                     cur.execute(query)
                 except Exception as e:
-                    raise RuntimeError(
+                    raise DataExportError(
                         f"Failed exporting {filename}: {self.safe_error_message(e)}"
                     ) from e
 
                 if cur.description is None:
-                    raise RuntimeError(
+                    raise DataExportError(
                         f"Failed exporting {filename}: query returned no column "
                         "metadata"
                     )
@@ -317,7 +325,7 @@ class Exporter(SqlServerIOBase):
                                 row_group_size=self.rowgroup_size,
                             )
                 except Exception as e:
-                    raise RuntimeError(
+                    raise DataExportError(
                         f"Failed exporting {filename}: {self.safe_error_message(e)}"
                     ) from e
 
