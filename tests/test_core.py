@@ -4,14 +4,14 @@ from unittest.mock import MagicMock
 import pyarrow.parquet as pq
 import pytest
 
-from pybutt.core import (
-    Exporter,
-    Importer,
+from pybutt.core.base import SqlServerIOBase
+from pybutt.core.config import (
     SqlConfig,
-    SqlServerIOBase,
     quote_identifier,
     validate_identifier,
 )
+from pybutt.io.exporter import Exporter
+from pybutt.io.importer import Importer
 
 
 def test_validate_identifier_valid():

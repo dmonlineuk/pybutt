@@ -17,7 +17,11 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from pybutt.core import Importer, SqlConfig, TransactionMode
+from pybutt.core.config import (
+    SqlConfig,
+    TransactionMode,
+)
+from pybutt.io.importer import Importer
 
 
 @pytest.fixture
@@ -420,7 +424,7 @@ class TestRowGroupModeRetry:
 class TestFileModeRetry:
     """Test file-level retry logic for FILE transaction mode."""
 
-    @patch("pybutt.core.Importer._import_file_impl")
+    @patch("pybutt.io.importer.Importer._import_file_impl")
     def test_file_retry_succeeds_on_first_attempt(
         self, mock_impl, importer_file_mode, tmp_path
     ):
@@ -431,7 +435,7 @@ class TestFileModeRetry:
 
         assert mock_impl.call_count == 1
 
-    @patch("pybutt.core.Importer._import_file_impl")
+    @patch("pybutt.io.importer.Importer._import_file_impl")
     def test_file_retry_fails_then_succeeds(
         self, mock_impl, importer_file_mode, tmp_path
     ):
@@ -446,7 +450,7 @@ class TestFileModeRetry:
 
         assert mock_impl.call_count == 2
 
-    @patch("pybutt.core.Importer._import_file_impl")
+    @patch("pybutt.io.importer.Importer._import_file_impl")
     def test_file_retry_exhausts_retries(self, mock_impl, importer_file_mode, tmp_path):
         """Test that file import fails after exhausting retries."""
         mock_impl.side_effect = Exception("Persistent connection error")
@@ -463,7 +467,7 @@ class TestFileModeRetry:
 class TestRowModeAutocommit:
     """Test autocommit behavior for ROW transaction mode."""
 
-    @patch("pybutt.core.Importer.connection_p")
+    @patch("pybutt.io.importer.Importer.connection_p")
     def test_row_mode_uses_autocommit(self, mock_connection_p, importer_row_mode):
         """Test that ROW mode creates connection with autocommit=True."""
         importer_row_mode.connection_p(autocommit=True)
@@ -480,8 +484,8 @@ class TestRowModeAutocommit:
 class TestImportFileImpl:
     """Test the _import_file_impl method logic."""
 
-    @patch("pybutt.core.pq.ParquetFile")
-    @patch("pybutt.core.Importer._import_batch_with_retry")
+    @patch("pybutt.io.importer.pq.ParquetFile")
+    @patch("pybutt.io.importer.Importer._import_batch_with_retry")
     def test_import_file_impl_batch_mode_retry_per_batch(
         self, mock_batch_retry, mock_parquet, importer_batch_mode, tmp_path
     ):
@@ -527,8 +531,8 @@ class TestImportFileImpl:
         # Verify _import_batch_with_retry was called for each batch
         assert mock_batch_retry.call_count == 2
 
-    @patch("pybutt.core.pq.ParquetFile")
-    @patch("pybutt.core.Importer._import_rowgroup_with_retry")
+    @patch("pybutt.io.importer.pq.ParquetFile")
+    @patch("pybutt.io.importer.Importer._import_rowgroup_with_retry")
     def test_import_file_impl_rowgroup_mode_retry_per_rowgroup(
         self, mock_rg_retry, mock_parquet, importer_rowgroup_mode, tmp_path
     ):

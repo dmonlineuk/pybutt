@@ -6,7 +6,12 @@ from pathlib import Path
 
 import typer
 
-from pybutt.core import Exporter, Importer, SqlConfig, TransactionMode
+from pybutt.core.config import (
+    SqlConfig,
+    TransactionMode,
+)
+from pybutt.io.exporter import Exporter
+from pybutt.io.importer import Importer
 
 app = typer.Typer(
     context_settings={"help_option_names": ["-?", "--help"]},
