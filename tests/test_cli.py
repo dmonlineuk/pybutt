@@ -9,6 +9,19 @@ from pybutt.core.config import TransactionMode
 runner = CliRunner()
 
 
+class DummyMerger:
+    last_instance = None
+
+    def __init__(self, config, sources):
+        self.config = config
+        self.sources = sources
+        self.merge_called = False
+        DummyMerger.last_instance = self
+
+    def merge(self, target_schema, target_table):
+        self.merge_called = True
+
+
 class DummyExporter:
     last_instance = None
 
@@ -243,6 +256,86 @@ def test_import_command_parses_options(monkeypatch, tmp_path):
     assert importer.worker_count == 4
     assert importer.batch_size == 2500
     assert importer.engine == "pyodbc"
+
+
+def test_merge_command_files_invokes_merge_helper(
+    monkeypatch, tmp_path, create_parquet
+):
+    create_parquet(tmp_path, "a.parquet", rows=3)
+    create_parquet(tmp_path, "b.parquet", rows=2)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('["a.parquet", "b.parquet"]')
+
+    called = {}
+
+    def fake_merge(manifest_path, output_file, rowgroup_size):
+        called["args"] = (manifest_path, output_file, rowgroup_size)
+
+    monkeypatch.setattr(cli, "merge_parquet_files", fake_merge)
+
+    output_file = tmp_path / "merged.parquet"
+    result = runner.invoke(
+        cli.app,
+        [
+            "merge",
+            "--manifest",
+            str(manifest),
+            "--output-file",
+            str(output_file),
+            "--trusted-connection",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "File merge completed successfully" in result.output
+    assert called["args"] == (manifest, output_file, 1048576)
+
+
+def test_merge_command_tables_invokes_table_merger(monkeypatch, tmp_path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        '{"version": 2, "type": "tables", "entries": ["dbo.TableA", "dbo.TableB"]}'
+    )
+
+    monkeypatch.setattr(cli, "TableMerger", DummyMerger)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "merge",
+            "--manifest",
+            str(manifest),
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "TargetTable",
+            "--trusted-connection",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Table merge completed successfully" in result.output
+    merger = DummyMerger.last_instance
+    assert merger is not None
+    assert merger.sources == ["dbo.TableA", "dbo.TableB"]
+    assert merger.merge_called
+
+
+def test_merge_command_files_requires_output_file(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('["a.parquet"]')
+
+    result = runner.invoke(
+        cli.app,
+        ["merge", "--manifest", str(manifest), "--trusted-connection"],
+    )
+
+    assert result.exit_code != 0
+    assert "--output-file is required for file manifests" in result.output
 
 
 def test_export_command_requires_username_without_trusted_connection():
