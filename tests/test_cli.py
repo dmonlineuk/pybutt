@@ -67,6 +67,7 @@ class DummyImporter:
         transaction_mode=None,
         engine="pyodbc",
         temp_manifest_filename=None,
+        delete_files=False,
     ):
         self.config = config
         self.input_path = Path(input_path)
@@ -76,6 +77,7 @@ class DummyImporter:
         self.batch_size = batch_size
         self.transaction_mode = transaction_mode
         self.engine = engine
+        self.delete_files = delete_files
         DummyImporter.last_instance = self
 
     def perform_work(self):
@@ -101,7 +103,7 @@ def test_import_help_includes_input_path_option():
     assert result.exit_code == 0
     assert "--input-path" in result.output
     assert "manifest" in result.output
-    assert "--no-tempdb" not in result.output
+    assert "--delete-files" in result.output
 
 
 def test_export_command_parses_options(monkeypatch, tmp_path):
@@ -397,8 +399,8 @@ def test_merge_command_files_invokes_merge_helper(
 
     called = {}
 
-    def fake_merge(manifest_path, output_file, rowgroup_size):
-        called["args"] = (manifest_path, output_file, rowgroup_size)
+    def fake_merge(manifest_path, output_file, rowgroup_size, delete_originals=False):
+        called["args"] = (manifest_path, output_file, rowgroup_size, delete_originals)
 
     monkeypatch.setattr(cli, "merge_parquet_files", fake_merge)
 
@@ -417,7 +419,7 @@ def test_merge_command_files_invokes_merge_helper(
 
     assert result.exit_code == 0
     assert "File merge completed successfully" in result.output
-    assert called["args"] == (manifest, output_file, 1048576)
+    assert called["args"] == (manifest, output_file, 1048576, False)
 
 
 def test_import_command_uses_local_temp_tables_by_default(monkeypatch, tmp_path):
@@ -449,6 +451,39 @@ def test_import_command_uses_local_temp_tables_by_default(monkeypatch, tmp_path)
     assert result.exit_code == 0
     importer = DummyImporter.last_instance
     assert importer is not None
+
+
+def test_import_command_parses_delete_files_option(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Importer", DummyImporter)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    manifest = "manifest.json"
+    result = runner.invoke(
+        cli.app,
+        [
+            "import",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--input-path",
+            str(input_dir),
+            "--manifest-filename",
+            manifest,
+            "--trusted-connection",
+            "--delete-files",
+        ],
+    )
+
+    assert result.exit_code == 0
+    importer = DummyImporter.last_instance
+    assert importer is not None
+    assert importer.delete_files is True
 
 
 def test_merge_command_tables_invokes_table_merger(monkeypatch, tmp_path):

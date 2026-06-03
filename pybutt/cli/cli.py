@@ -302,7 +302,8 @@ def import_data(
     ),
     temp_manifest_filename: str | None = typer.Option(
         None,
-        "--temp-manifest-filename",
+        "--output-manifest-filename",
+        "-om",
         help=(
             "Override the temporary worker manifest filename written during "
             "multi-worker import. Defaults to <schema>_<table>_temp_manifest.json."
@@ -387,6 +388,12 @@ def import_data(
             "recommended), rowgroup (per row group), file (entire file)."
         ),
     ),
+    delete_files: bool = typer.Option(
+        False,
+        "--delete-files",
+        "-f",
+        help=("Delete source parquet files and the manifest after import."),
+    ),
 ) -> None:
     """Import Parquet files into a SQL Server table.
 
@@ -420,6 +427,7 @@ def import_data(
         transaction_mode=transaction_mode,
         engine=engine.lower(),
         temp_manifest_filename=temp_manifest_filename,
+        delete_files=delete_files,
     )
     importer.perform_work()
     typer.secho("Import completed successfully.", fg=typer.colors.GREEN)
@@ -445,6 +453,12 @@ def merge(
         help="Output Parquet file when merging files.",
         file_okay=True,
         dir_okay=False,
+    ),
+    delete_files: bool = typer.Option(
+        False,
+        "--delete-files",
+        "-f",
+        help=("Delete source parquet files and the manifest after merging."),
     ),
     rowgroup_size: int = typer.Option(  # noqa: B008
         1_048_576, "--rowgroup-size", "-rs", help="Rowgroup size for output."
@@ -488,7 +502,12 @@ def merge(
         if output_file is None:
             raise typer.BadParameter("--output-file is required for file manifests")
 
-        merge_parquet_files(manifest_path, output_file, rowgroup_size)
+        merge_parquet_files(
+            manifest_path,
+            output_file,
+            rowgroup_size,
+            delete_originals=delete_files,
+        )
         typer.secho("File merge completed successfully.", fg=typer.colors.GREEN)
         return
 
@@ -516,6 +535,8 @@ def merge(
 
         merger = TableMerger(config=config, sources=manifest["entries"])
         merger.merge(target_schema=schema, target_table=table)
+        if delete_files and manifest_path.exists():
+            manifest_path.unlink()
         typer.secho("Table merge completed successfully.", fg=typer.colors.GREEN)
         return
 
@@ -551,8 +572,11 @@ def rewrite_command(
             "<manifest>_new.json based on the original manifest name."
         ),
     ),
-    delete_originals: bool = typer.Option(
-        False, "--delete-originals", "-d"
+    delete_files: bool = typer.Option(
+        False,
+        "--delete-files",
+        "-f",
+        help=("Delete source parquet files and the manifest after merge."),
     ),  # noqa: B008
 ):
     """
@@ -563,7 +587,7 @@ def rewrite_command(
         outdir,
         rowgroup_size,
         new_manifest,
-        delete_originals,
+        delete_originals=delete_files,
     )
 
 
