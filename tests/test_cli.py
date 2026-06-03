@@ -312,6 +312,16 @@ def test_import_command_uses_default_manifest_filename(monkeypatch, tmp_path):
             "MyTable",
             "--input-path",
             str(input_dir),
+            "--trusted-connection",
+        ],
+    )
+
+    assert result.exit_code == 0
+    importer = DummyImporter.last_instance
+    assert importer is not None
+    assert importer.manifest_filename is None
+
+
 def test_merge_command_files_invokes_merge_helper(
     monkeypatch, tmp_path, create_parquet
 ):
@@ -341,8 +351,8 @@ def test_merge_command_files_invokes_merge_helper(
     )
 
     assert result.exit_code == 0
-    importer = DummyImporter.last_instance
-    assert importer.manifest_filename is None
+    assert "File merge completed successfully" in result.output
+    assert called["args"] == (manifest, output_file, 1048576)
 
 
 def test_import_command_accepts_no_tempdb(monkeypatch, tmp_path):
@@ -355,8 +365,27 @@ def test_import_command_accepts_no_tempdb(monkeypatch, tmp_path):
         cli.app,
         [
             "import",
-    assert "File merge completed successfully" in result.output
-    assert called["args"] == (manifest, output_file, 1048576)
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--input-path",
+            str(input_dir),
+            "--manifest-filename",
+            manifest,
+            "--trusted-connection",
+            "--no-tempdb",
+        ],
+    )
+
+    assert result.exit_code == 0
+    importer = DummyImporter.last_instance
+    assert importer is not None
+    assert importer.use_tempdb is False
 
 
 def test_merge_command_tables_invokes_table_merger(monkeypatch, tmp_path):
@@ -381,21 +410,15 @@ def test_merge_command_tables_invokes_table_merger(monkeypatch, tmp_path):
             "dbo",
             "--table",
             "MyTable",
-            "--input-path",
-            str(input_dir),
-            "--manifest-filename",
-            manifest,
-            "--trusted-connection",
-            "--no-tempdb",
-            "TargetTable",
             "--trusted-connection",
         ],
     )
 
     assert result.exit_code == 0
-    importer = DummyImporter.last_instance
-    assert importer is not None
-    assert importer.use_tempdb is False
+    merger = DummyMerger.last_instance
+    assert merger is not None
+    assert merger.sources == ["dbo.TableA", "dbo.TableB"]
+    assert merger.merge_called
 
 
 def test_import_command_passes_temp_manifest_filename(monkeypatch, tmp_path):
@@ -429,11 +452,6 @@ def test_import_command_passes_temp_manifest_filename(monkeypatch, tmp_path):
     assert result.exit_code == 0
     importer = DummyImporter.last_instance
     assert importer.temp_manifest_filename == "custom_temp_manifest.json"
-    assert "Table merge completed successfully" in result.output
-    merger = DummyMerger.last_instance
-    assert merger is not None
-    assert merger.sources == ["dbo.TableA", "dbo.TableB"]
-    assert merger.merge_called
 
 
 def test_merge_command_files_requires_output_file(tmp_path):
