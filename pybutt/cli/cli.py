@@ -16,10 +16,13 @@ from pybutt.core.config import (
 )
 from pybutt.files.files import (
     inspect_manifest,
+    load_manifest,
+    merge_parquet_files,
     rewrite_parquet_files,
 )
 from pybutt.io.exporter import Exporter
 from pybutt.io.importer import Importer
+from pybutt.io.merger import TableMerger
 
 runner = CliRunner()
 
@@ -429,6 +432,103 @@ def import_data(
     )
     importer.perform_work()
     typer.secho("Import completed successfully.", fg=typer.colors.GREEN)
+
+
+@app.command(
+    "merge",
+    help=(
+        "Merge objects listed in a manifest. "
+        "For file manifests, concatenate Parquet files to a single output. "
+        "For table manifests, merge SQL tables into a single target table."
+    ),
+)
+def merge(
+    manifest_path: Path = typer.Option(  # noqa: B008
+        ..., "--manifest", "-m", help="Path to manifest file.", exists=True
+    ),
+    # File merge options
+    output_file: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--output-file",
+        "-o",
+        help="Output Parquet file when merging files.",
+        file_okay=True,
+        dir_okay=False,
+    ),
+    rowgroup_size: int = typer.Option(  # noqa: B008
+        1_048_576, "--rowgroup-size", "-rs", help="Rowgroup size for output."
+    ),
+    # SQL merge options (target)
+    server: str | None = typer.Option(
+        None, "--server", "-s", help="SQL Server host."
+    ),  # noqa: B008
+    database: str | None = typer.Option(  # noqa: B008
+        None, "--database", "-d", help="Target database."
+    ),
+    schema: str | None = typer.Option(
+        None, "--schema", "-S", help="Target schema."
+    ),  # noqa: B008
+    table: str | None = typer.Option(
+        None, "--table", "-t", help="Target table."
+    ),  # noqa: B008
+    trusted_connection: bool = typer.Option(
+        False, "--trusted-connection", "-T"
+    ),  # noqa: B008
+    username: str | None = typer.Option(None, "--username", "-u"),  # noqa: B008
+    password: str | None = typer.Option(None, "--password", "-p"),  # noqa: B008
+    driver: str = typer.Option(  # noqa: B008
+        "ODBC Driver 18 for SQL Server", "--driver", "-D", help="ODBC driver name."
+    ),
+    trust_cert: bool = typer.Option(False, "--trust-cert", "-tc"),  # noqa: B008
+    encrypt: bool = typer.Option(
+        True, "--encrypt/--no-encrypt", "-e/-ne"
+    ),  # noqa: B008
+    retries: int = typer.Option(3, "--retries", "-rc", min=1),  # noqa: B008
+    verbose: bool = typer.Option(False, "--verbose", "-v"),  # noqa: B008
+) -> None:
+    """Merge manifest entries according to manifest type."""
+
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    manifest = load_manifest(manifest_path)
+
+    if manifest["type"] == "files":
+        if output_file is None:
+            raise typer.BadParameter("--output-file is required for file manifests")
+
+        merge_parquet_files(manifest_path, output_file, rowgroup_size)
+        typer.secho("File merge completed successfully.", fg=typer.colors.GREEN)
+        return
+
+    # tables manifest
+    if manifest["type"] == "tables":
+        if not (server and database and schema and table):
+            raise typer.BadParameter(
+                "--server, --database, --schema and "
+                "--table are required for table manifests"
+            )
+
+        config = build_sql_config(
+            server=server,
+            database=database,
+            schema=schema,
+            table=table,
+            username=username,
+            password=password,
+            driver=driver,
+            trusted_connection=trusted_connection,
+            trust_cert=trust_cert,
+            encrypt=encrypt,
+            retries=retries,
+        )
+
+        merger = TableMerger(config=config, sources=manifest["entries"])
+        merger.merge(target_schema=schema, target_table=table)
+        typer.secho("Table merge completed successfully.", fg=typer.colors.GREEN)
+        return
+
+    raise typer.BadParameter(f"Unsupported manifest type: {manifest['type']}")
 
 
 @app.command("inspect")

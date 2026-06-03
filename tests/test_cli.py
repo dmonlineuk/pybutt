@@ -9,6 +9,19 @@ from pybutt.core.config import TransactionMode
 runner = CliRunner()
 
 
+class DummyMerger:
+    last_instance = None
+
+    def __init__(self, config, sources):
+        self.config = config
+        self.sources = sources
+        self.merge_called = False
+        DummyMerger.last_instance = self
+
+    def merge(self, target_schema, target_table):
+        self.merge_called = True
+
+
 class DummyExporter:
     last_instance = None
 
@@ -299,6 +312,30 @@ def test_import_command_uses_default_manifest_filename(monkeypatch, tmp_path):
             "MyTable",
             "--input-path",
             str(input_dir),
+def test_merge_command_files_invokes_merge_helper(
+    monkeypatch, tmp_path, create_parquet
+):
+    create_parquet(tmp_path, "a.parquet", rows=3)
+    create_parquet(tmp_path, "b.parquet", rows=2)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('["a.parquet", "b.parquet"]')
+
+    called = {}
+
+    def fake_merge(manifest_path, output_file, rowgroup_size):
+        called["args"] = (manifest_path, output_file, rowgroup_size)
+
+    monkeypatch.setattr(cli, "merge_parquet_files", fake_merge)
+
+    output_file = tmp_path / "merged.parquet"
+    result = runner.invoke(
+        cli.app,
+        [
+            "merge",
+            "--manifest",
+            str(manifest),
+            "--output-file",
+            str(output_file),
             "--trusted-connection",
         ],
     )
@@ -318,6 +355,24 @@ def test_import_command_accepts_no_tempdb(monkeypatch, tmp_path):
         cli.app,
         [
             "import",
+    assert "File merge completed successfully" in result.output
+    assert called["args"] == (manifest, output_file, 1048576)
+
+
+def test_merge_command_tables_invokes_table_merger(monkeypatch, tmp_path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        '{"version": 2, "type": "tables", "entries": ["dbo.TableA", "dbo.TableB"]}'
+    )
+
+    monkeypatch.setattr(cli, "TableMerger", DummyMerger)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "merge",
+            "--manifest",
+            str(manifest),
             "--server",
             "localhost",
             "--database",
@@ -332,6 +387,8 @@ def test_import_command_accepts_no_tempdb(monkeypatch, tmp_path):
             manifest,
             "--trusted-connection",
             "--no-tempdb",
+            "TargetTable",
+            "--trusted-connection",
         ],
     )
 
@@ -372,6 +429,24 @@ def test_import_command_passes_temp_manifest_filename(monkeypatch, tmp_path):
     assert result.exit_code == 0
     importer = DummyImporter.last_instance
     assert importer.temp_manifest_filename == "custom_temp_manifest.json"
+    assert "Table merge completed successfully" in result.output
+    merger = DummyMerger.last_instance
+    assert merger is not None
+    assert merger.sources == ["dbo.TableA", "dbo.TableB"]
+    assert merger.merge_called
+
+
+def test_merge_command_files_requires_output_file(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('["a.parquet"]')
+
+    result = runner.invoke(
+        cli.app,
+        ["merge", "--manifest", str(manifest), "--trusted-connection"],
+    )
+
+    assert result.exit_code != 0
+    assert "--output-file is required for file manifests" in result.output
 
 
 def test_export_command_requires_username_without_trusted_connection():

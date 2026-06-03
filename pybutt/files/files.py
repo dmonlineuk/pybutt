@@ -256,5 +256,45 @@ def rewrite_parquet_files(
     return new_manifest_path
 
 
+def merge_parquet_files(
+    manifest_path: Path, output_file: Path, rowgroup_size: int = 1_048_576
+):
+    """Merge all parquet files listed in a manifest into a single Parquet file.
+
+    The resulting file will use the schema of the first file. All subsequent
+    files must be schema-compatible (column names/types) or behavior is undefined.
+    """
+    manifest_path = Path(manifest_path)
+    base_dir = manifest_path.parent
+
+    manifest = load_manifest(manifest_path)
+    if manifest["type"] != "files":
+        raise UnsupportedManifestTypeError(
+            f"Merge only supports file manifests, got: {manifest['type']}"
+        )
+
+    entries = validate_manifest_entries(manifest, base_dir)
+    if not entries:
+        raise InvalidManifestError("Manifest contains no entries to merge")
+
+    output_file = Path(output_file)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Use schema from first file
+    first_path = base_dir / entries[0]
+    first_pf = pq.ParquetFile(first_path)
+    schema = first_pf.schema_arrow
+
+    with pq.ParquetWriter(output_file, schema, compression="snappy") as writer:
+        for entry in entries:
+            src = base_dir / entry
+            pf = pq.ParquetFile(src)
+            # If schema differs, let pyarrow handle or raise downstream
+            for batch in pf.iter_batches():
+                writer.write_table(pa.Table.from_batches([batch]))
+
+    return output_file
+
+
 if __name__ == "__main__":
     pass
