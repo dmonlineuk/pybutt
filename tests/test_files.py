@@ -159,6 +159,23 @@ def test_merge_parquet_files(tmp_path, create_parquet):
     assert list(merged.column_names) == ["id", "value"]
 
 
+def test_merge_parquet_files_respects_rowgroup_size(tmp_path, create_parquet):
+    create_parquet(tmp_path, "a.parquet", rows=3, rowgroup_size=2)
+    create_parquet(tmp_path, "b.parquet", rows=2, rowgroup_size=2)
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(["a.parquet", "b.parquet"]))
+
+    output_file = tmp_path / "merged.parquet"
+    merge_parquet_files(manifest, output_file, rowgroup_size=3)
+
+    pf = pq.ParquetFile(output_file)
+    assert pf.metadata.num_row_groups == 2
+    assert [
+        pf.metadata.row_group(i).num_rows for i in range(pf.metadata.num_row_groups)
+    ] == [3, 2]
+
+
 def test_merge_parquet_files_writes_manifest(tmp_path, create_parquet):
     create_parquet(tmp_path, "a.parquet", rows=3, rowgroup_size=2)
     create_parquet(tmp_path, "b.parquet", rows=2, rowgroup_size=2)

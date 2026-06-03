@@ -238,6 +238,47 @@ def test_pyodbc_export_buffers_rows_for_parquet_rowgroups(monkeypatch, tmp_path)
     assert parquet_file.metadata.num_rows == 4
 
 
+def test_duckdb_export_uses_rowgroup_size(tmp_path, monkeypatch):
+    import duckdb
+
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+
+    monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
+    exporter = Exporter(
+        config=config,
+        output_path=tmp_path,
+        worker_count=1,
+        file_count=1,
+        rowgroup_size=7,
+        engine="duckdb",
+    )
+
+    conn = duckdb.connect(database=":memory:")
+    conn.execute(
+        "CREATE TABLE test AS "
+        "SELECT range::INT64 AS id, CAST(range AS VARCHAR) AS value "
+        "FROM range(18)"
+    )
+    reader = conn.execute("SELECT * FROM test").arrow()
+
+    exporter._write_parquet_from_record_batches(
+        reader, tmp_path / "test.parquet", "test.parquet"
+    )
+
+    parquet_file = pq.ParquetFile(tmp_path / "test.parquet")
+    assert parquet_file.num_row_groups == 3
+    assert [
+        parquet_file.metadata.row_group(i).num_rows
+        for i in range(parquet_file.num_row_groups)
+    ] == [7, 7, 4]
+
+
 def test_importer_invalid_engine():
     config = SqlConfig(
         server="localhost",
