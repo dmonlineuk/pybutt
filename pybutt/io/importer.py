@@ -22,7 +22,12 @@ from pybutt.exceptions import (
     SchemaMismatchError,
     UnsupportedManifestTypeError,
 )
-from pybutt.files.files import load_manifest, validate_manifest_entries
+from pybutt.files.files import (
+    default_manifest_filename,
+    default_temp_manifest_filename,
+    load_manifest,
+    validate_manifest_entries,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -32,17 +37,27 @@ class Importer(SqlServerIOBase):
         self,
         config: SqlConfig,
         input_path,
-        manifest_filename,
+        manifest_filename: str | None,
         worker_count=1,
         batch_size=1_000,
         transaction_mode: TransactionMode = TransactionMode.BATCH,
         engine="pyodbc",
         use_tempdb: bool = True,
+        temp_manifest_filename: str | None = None,
     ):
         super().__init__(config)
 
         self.input_path = Path(input_path)
-        self.manifest_filename = manifest_filename
+        self.manifest_filename = (
+            manifest_filename
+            if manifest_filename
+            else default_manifest_filename(self.schema, self.table)
+        )
+        self.temp_manifest_filename = (
+            temp_manifest_filename
+            if temp_manifest_filename
+            else default_temp_manifest_filename(self.schema, self.table)
+        )
 
         self.worker_count = worker_count
         self.batch_size = batch_size

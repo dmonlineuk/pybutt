@@ -114,6 +114,15 @@ def export(
         dir_okay=True,
         writable=True,
     ),
+    manifest_filename: str | None = typer.Option(
+        None,
+        "--manifest-filename",
+        "-m",
+        help=(
+            "Manifest filename to write for export. Defaults to "
+            "<schema>_<table>_manifest.json."
+        ),
+    ),
     trusted_connection: bool = typer.Option(  # noqa: B008
         False,
         "--trusted-connection",
@@ -247,6 +256,7 @@ def export(
         rowgroup_size=rowgroup_size,
         fetch_size=fetch_size,
         engine=engine.lower(),
+        manifest_filename=manifest_filename,
     )
     exporter.perform_work()
     typer.secho("Export completed successfully.", fg=typer.colors.GREEN)
@@ -278,11 +288,22 @@ def import_data(
         file_okay=False,
         dir_okay=True,
     ),
-    manifest_filename: str = typer.Option(  # noqa: B008
-        ...,
+    manifest_filename: str | None = typer.Option(  # noqa: B008
+        None,
         "--manifest-filename",
         "-m",
-        help="Manifest filename containing exported parquet file names.",
+        help=(
+            "Manifest filename containing exported parquet file names. "
+            "Defaults to <schema>_<table>_manifest.json."
+        ),
+    ),
+    temp_manifest_filename: str | None = typer.Option(
+        None,
+        "--temp-manifest-filename",
+        help=(
+            "Override the temporary worker manifest filename written during "
+            "multi-worker import. Defaults to <schema>_<table>_temp_manifest.json."
+        ),
     ),
     trusted_connection: bool = typer.Option(  # noqa: B008
         False,
@@ -404,6 +425,7 @@ def import_data(
         transaction_mode=transaction_mode,
         engine=engine.lower(),
         use_tempdb=not no_tempdb,
+        temp_manifest_filename=temp_manifest_filename,
     )
     importer.perform_work()
     typer.secho("Import completed successfully.", fg=typer.colors.GREEN)
@@ -429,8 +451,14 @@ def rewrite_command(
         None, "--outdir", "-o", help="Output directory"
     ),
     rowgroup_size: int = typer.Option(..., "--rowgroup-size", "-r"),  # noqa: B008
-    new_manifest: str = typer.Option(  # noqa: B008
-        "manifest_new.json", "--new-manifest", "-n"
+    new_manifest: str | None = typer.Option(  # noqa: B008
+        None,
+        "--new-manifest",
+        "-n",
+        help=(
+            "Optional filename for the rewritten manifest. Defaults to "
+            "<manifest>_new.json based on the original manifest name."
+        ),
     ),
     delete_originals: bool = typer.Option(
         False, "--delete-originals", "-d"

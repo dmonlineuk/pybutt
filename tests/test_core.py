@@ -307,6 +307,22 @@ def test_importer_load_manifest_missing_file(tmp_path):
         importer.load_manifest_entries()
 
 
+def test_importer_default_manifest_filename():
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+    importer = Importer(
+        config=config,
+        input_path=Path("./data"),
+        manifest_filename=None,
+    )
+    assert importer.manifest_filename == "dbo_MyTable_manifest.json"
+
+
 def test_importer_make_temp_table_name_local():
     config = SqlConfig(
         server="localhost",

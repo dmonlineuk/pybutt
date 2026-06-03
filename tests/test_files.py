@@ -85,7 +85,32 @@ def test_rewrite_default_outdir(tmp_path, create_parquet):
         "entries": ["data_new.parquet"],
     }
 
+
+def test_rewrite_defaults_new_manifest_name(tmp_path, create_parquet):
+    create_parquet(tmp_path, "data.parquet", rows=12, rowgroup_size=3)
+
+    manifest = tmp_path / "example_manifest.json"
+    with open(manifest, "w") as f:
+        json.dump(["data.parquet"], f)
+
+    new_manifest = rewrite_parquet_files(
+        manifest_path=manifest,
+        output_dir=None,
+        new_rowgroup_size=6,
+        new_manifest_name=None,
+        delete_originals=False,
+    )
+
+    assert new_manifest.name == "example_manifest_new.json"
+    assert new_manifest.exists()
+
+    with open(new_manifest) as f:
+        manifest_data = json.load(f)
+
+    assert manifest_data["entries"] == ["data_new.parquet"]
+
     # Validate rowgroup size
+    new_file = tmp_path / "data_new.parquet"
     pf = pq.ParquetFile(new_file)
     assert pf.metadata.num_row_groups == 2
 
