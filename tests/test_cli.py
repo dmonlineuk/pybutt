@@ -186,6 +186,72 @@ def test_export_command_parses_engine_option(monkeypatch, tmp_path):
     assert exporter.engine == "pyodbc"
 
 
+def test_export_command_manifest_version_is_2(monkeypatch, tmp_path):
+    import pybutt.io.exporter as exporter_module
+
+    def fake_partition_meta(self):
+        self.partition_count = 1
+        self.chunk_size = 1
+
+    monkeypatch.setattr(exporter_module.Exporter, "partition_meta", fake_partition_meta)
+
+    def fake_export_partition(self, n):
+        filename = f"{self.config.schema}_{self.config.table}_part_{n:05d}.parquet"
+        filepath = self.output_path / filename
+        filepath.write_text("dummy")
+        return filename
+
+    monkeypatch.setattr(
+        exporter_module.Exporter, "export_partition", fake_export_partition
+    )
+
+    class DummyPool:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def map(self, func, args):
+            return [func(arg) for arg in args]
+
+    class DummyContext:
+        def Pool(self, count):
+            return DummyPool()
+
+    monkeypatch.setattr(exporter_module, "get_context", lambda _: DummyContext())
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "export",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--output-path",
+            str(tmp_path),
+            "--trusted-connection",
+            "--file-count",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    manifest_file = tmp_path / "dbo_MyTable_manifest.json"
+    assert manifest_file.exists()
+    with open(manifest_file) as f:
+        manifest_data = json.load(f)
+
+    assert manifest_data["version"] == 2
+    assert manifest_data["type"] == "files"
+    assert manifest_data["entries"] == ["dbo_MyTable_part_00000.parquet"]
+
+
 def test_import_command_parses_engine_option(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "Importer", DummyImporter)
 
@@ -725,6 +791,35 @@ def test_cli_rewrite_defaults_manifest_name(tmp_path, create_parquet):
 
     assert result.exit_code == 0
     assert (tmp_path / "manifest_new.json").exists()
+
+
+def test_cli_rewrite_manifest_version_is_2(tmp_path, create_parquet):
+    create_parquet(tmp_path, "x.parquet", rows=8, rowgroup_size=2)
+
+    manifest = tmp_path / "manifest.json"
+    with open(manifest, "w") as f:
+        json.dump(["x.parquet"], f)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "rewrite",
+            str(manifest),
+            "--rowgroup-size",
+            "4",
+        ],
+    )
+
+    assert result.exit_code == 0
+    manifest_file = tmp_path / "manifest_new.json"
+    assert manifest_file.exists()
+
+    with open(manifest_file) as f:
+        manifest_data = json.load(f)
+
+    assert manifest_data["version"] == 2
+    assert manifest_data["type"] == "files"
+    assert manifest_data["entries"] == ["x_new.parquet"]
 
 
 def test_cli_files_inspect_verbose(tmp_path, create_parquet):

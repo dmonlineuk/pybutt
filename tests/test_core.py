@@ -147,6 +147,54 @@ def test_exporter_fetch_size_override(monkeypatch):
     assert exporter.fetch_size == 16_384
 
 
+def test_exporter_writes_manifest_version_2(monkeypatch, tmp_path):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+
+    monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
+    exporter = Exporter(
+        config=config,
+        output_path=tmp_path,
+        worker_count=1,
+        file_count=1,
+        rowgroup_size=1_048_576,
+    )
+    exporter.partition_count = 1
+    exporter.export_partition = lambda n: "dbo_MyTable_part_00000.parquet"
+
+    class DummyPool:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def map(self, func, args):
+            return [func(arg) for arg in args]
+
+    class DummyContext:
+        def Pool(self, count):
+            return DummyPool()
+
+    monkeypatch.setattr("pybutt.io.exporter.get_context", lambda _: DummyContext())
+
+    exporter.perform_work()
+
+    manifest_file = tmp_path / exporter.manifest_filename
+    assert manifest_file.exists()
+    with open(manifest_file) as f:
+        manifest_data = json.load(f)
+
+    assert manifest_data["version"] == 2
+    assert manifest_data["type"] == "files"
+    assert manifest_data["entries"] == ["dbo_MyTable_part_00000.parquet"]
+
+
 def test_pyodbc_export_buffers_rows_for_parquet_rowgroups(monkeypatch, tmp_path):
     config = SqlConfig(
         server="localhost",

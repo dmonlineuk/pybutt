@@ -245,7 +245,7 @@ def rewrite_parquet_files(
     with open(new_manifest_path, "w") as f:
         json.dump(
             {
-                "version": MANIFEST_VERSION_1,
+                "version": MANIFEST_VERSION_2,
                 "type": "files",
                 "entries": new_files,
             },
