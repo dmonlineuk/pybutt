@@ -383,7 +383,6 @@ def test_importer_make_temp_table_name_local():
         config=config,
         input_path=Path("./data"),
         manifest_filename="manifest.json",
-        use_tempdb=False,
     )
     name = importer._make_temp_table_name(0)
     assert name.startswith("dbo.users_01_")
@@ -488,3 +487,50 @@ def test_importer_perform_work_with_multiple_workers(monkeypatch, tmp_path):
         "##dbo_MyTable_02_efgh5678": ["b.parquet"],
     }
     assert manifest_written["tables"] == created
+
+
+def test_importer_multi_worker_defaults_to_local_temp_tables(monkeypatch, tmp_path):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+    input_path = tmp_path / "data"
+    input_path.mkdir()
+
+    importer = Importer(
+        config=config,
+        input_path=input_path,
+        manifest_filename="manifest.json",
+        worker_count=2,
+    )
+
+    imported = []
+    created_tables = []
+
+    def fake_load_manifest_entries():
+        return ["a.parquet", "b.parquet"]
+
+    def fake_create_temp_tables(count):
+        for i in range(count):
+            created_tables.append(importer._make_temp_table_name(i))
+        return created_tables
+
+    monkeypatch.setattr(importer, "load_manifest_entries", fake_load_manifest_entries)
+    monkeypatch.setattr(importer, "_create_temp_tables", fake_create_temp_tables)
+    monkeypatch.setattr(
+        importer, "_write_temp_manifest", lambda tables: tmp_path / "temp_manifest.json"
+    )
+    monkeypatch.setattr(
+        importer,
+        "_import_files_to_temp_table",
+        lambda target_table, filenames: imported.append((target_table, filenames)),
+    )
+
+    importer.perform_work()
+
+    assert created_tables
+    assert all(not name.startswith("##") for name in created_tables)
+    assert all("." in name for name in created_tables)

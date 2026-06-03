@@ -66,7 +66,6 @@ class DummyImporter:
         batch_size=1000,
         transaction_mode=None,
         engine="pyodbc",
-        use_tempdb=True,
         temp_manifest_filename=None,
     ):
         self.config = config
@@ -77,7 +76,6 @@ class DummyImporter:
         self.batch_size = batch_size
         self.transaction_mode = transaction_mode
         self.engine = engine
-        self.use_tempdb = use_tempdb
         DummyImporter.last_instance = self
 
     def perform_work(self):
@@ -103,6 +101,7 @@ def test_import_help_includes_input_path_option():
     assert result.exit_code == 0
     assert "--input-path" in result.output
     assert "manifest" in result.output
+    assert "--no-tempdb" not in result.output
 
 
 def test_export_command_parses_options(monkeypatch, tmp_path):
@@ -421,7 +420,7 @@ def test_merge_command_files_invokes_merge_helper(
     assert called["args"] == (manifest, output_file, 1048576)
 
 
-def test_import_command_accepts_no_tempdb(monkeypatch, tmp_path):
+def test_import_command_uses_local_temp_tables_by_default(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "Importer", DummyImporter)
 
     input_dir = tmp_path / "input"
@@ -444,14 +443,12 @@ def test_import_command_accepts_no_tempdb(monkeypatch, tmp_path):
             "--manifest-filename",
             manifest,
             "--trusted-connection",
-            "--no-tempdb",
         ],
     )
 
     assert result.exit_code == 0
     importer = DummyImporter.last_instance
     assert importer is not None
-    assert importer.use_tempdb is False
 
 
 def test_merge_command_tables_invokes_table_merger(monkeypatch, tmp_path):
