@@ -23,7 +23,10 @@ from pybutt.exceptions import (
     EngineSelectionError,
     TableEmptyError,
 )
-from pybutt.files.files import default_manifest_filename
+from pybutt.files.files import (
+    MANIFEST_VERSION_2,
+    default_manifest_filename,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -396,7 +399,7 @@ class Exporter(SqlServerIOBase):
             with open(manifest_file, "w") as f:
                 j.dump(
                     {
-                        "version": 1,
+                        "version": MANIFEST_VERSION_2,
                         "type": "files",
                         "entries": filenames,
                     },

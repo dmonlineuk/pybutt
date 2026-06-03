@@ -81,7 +81,7 @@ def test_rewrite_default_outdir(tmp_path, create_parquet):
         manifest = json.load(f)
 
     assert manifest == {
-        "version": 1,
+        "version": 2,
         "type": "files",
         "entries": ["data_new.parquet"],
     }
@@ -109,6 +109,8 @@ def test_rewrite_defaults_new_manifest_name(tmp_path, create_parquet):
         manifest_data = json.load(f)
 
     assert manifest_data["entries"] == ["data_new.parquet"]
+    assert manifest_data["version"] == 2
+    assert manifest_data["type"] == "files"
 
     # Validate rowgroup size
     new_file = tmp_path / "data_new.parquet"
