@@ -42,7 +42,6 @@ class Importer(SqlServerIOBase):
         batch_size=1_000,
         transaction_mode: TransactionMode = TransactionMode.BATCH,
         engine="pyodbc",
-        use_tempdb: bool = True,
         temp_manifest_filename: str | None = None,
     ):
         super().__init__(config)
@@ -71,7 +70,6 @@ class Importer(SqlServerIOBase):
                 f"engine must be one of {sorted(ENGINE_CHOICES)}"
             )
         self.engine = engine
-        self.use_tempdb = use_tempdb
 
     def load_manifest(self):
         manifest_file = self.input_path / self.manifest_filename
@@ -363,8 +361,6 @@ class Importer(SqlServerIOBase):
 
     def _make_temp_table_name(self, worker_index: int) -> str:
         suffix = uuid.uuid4().hex[:8]
-        if self.use_tempdb:
-            return f"##{self.schema}_{self.table}_{worker_index+1:02d}_{suffix}"
         return f"{self.schema}.{self.table}_{worker_index+1:02d}_{suffix}"
 
     def _create_temp_tables(self, count: int) -> list[str]:
