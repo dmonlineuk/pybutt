@@ -159,6 +159,27 @@ def test_merge_parquet_files(tmp_path, create_parquet):
     assert list(merged.column_names) == ["id", "value"]
 
 
+def test_merge_parquet_files_writes_manifest(tmp_path, create_parquet):
+    create_parquet(tmp_path, "a.parquet", rows=3, rowgroup_size=2)
+    create_parquet(tmp_path, "b.parquet", rows=2, rowgroup_size=2)
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(["a.parquet", "b.parquet"]))
+
+    output_file = tmp_path / "merged.parquet"
+    merge_parquet_files(manifest, output_file, rowgroup_size=3)
+
+    expected_manifest = tmp_path / f"{manifest.stem}_merged{manifest.suffix}"
+    assert expected_manifest.exists()
+    with open(expected_manifest) as f:
+        data = json.load(f)
+    assert data == {
+        "version": 2,
+        "type": "files",
+        "entries": [output_file.name],
+    }
+
+
 def test_merge_parquet_files_deletes_sources_and_manifest(tmp_path, create_parquet):
     create_parquet(tmp_path, "a.parquet", rows=3, rowgroup_size=2)
     create_parquet(tmp_path, "b.parquet", rows=2, rowgroup_size=2)

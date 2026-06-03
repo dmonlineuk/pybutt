@@ -535,6 +535,21 @@ def merge(
 
         merger = TableMerger(config=config, sources=manifest["entries"])
         merger.merge(target_schema=schema, target_table=table)
+
+        # Write a manifest for the merged table
+        new_manifest_name = f"{manifest_path.stem}_merged{manifest_path.suffix}"
+        new_manifest_path = manifest_path.parent / new_manifest_name
+        with open(new_manifest_path, "w") as f:
+            json.dump(
+                {
+                    "version": 2,
+                    "type": "tables",
+                    "entries": [f"{schema}.{table}"],
+                },
+                f,
+                indent=4,
+            )
+
         if delete_files and manifest_path.exists():
             manifest_path.unlink()
         typer.secho("Table merge completed successfully.", fg=typer.colors.GREEN)
