@@ -118,6 +118,31 @@ def test_rewrite_defaults_new_manifest_name(tmp_path, create_parquet):
     assert pf.metadata.num_row_groups == 2
 
 
+def test_rewrite_deletes_original_files_and_manifest(tmp_path, create_parquet):
+    create_parquet(tmp_path, "data.parquet", rows=12, rowgroup_size=3)
+
+    manifest = tmp_path / "manifest.json"
+    with open(manifest, "w") as f:
+        json.dump(["data.parquet"], f)
+
+    new_manifest = rewrite_parquet_files(
+        manifest_path=manifest,
+        output_dir=None,
+        new_rowgroup_size=6,
+        new_manifest_name=None,
+        delete_originals=True,
+    )
+
+    assert new_manifest.exists()
+    assert not (tmp_path / "data.parquet").exists()
+    assert not manifest.exists()
+
+    with open(new_manifest) as f:
+        manifest_data = json.load(f)
+
+    assert manifest_data["entries"] == ["data_new.parquet"]
+
+
 def test_merge_parquet_files(tmp_path, create_parquet):
     create_parquet(tmp_path, "a.parquet", rows=3, rowgroup_size=2)
     create_parquet(tmp_path, "b.parquet", rows=2, rowgroup_size=2)
@@ -132,6 +157,22 @@ def test_merge_parquet_files(tmp_path, create_parquet):
     merged = pq.read_table(output_file)
     assert merged.num_rows == 5
     assert list(merged.column_names) == ["id", "value"]
+
+
+def test_merge_parquet_files_deletes_sources_and_manifest(tmp_path, create_parquet):
+    create_parquet(tmp_path, "a.parquet", rows=3, rowgroup_size=2)
+    create_parquet(tmp_path, "b.parquet", rows=2, rowgroup_size=2)
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(["a.parquet", "b.parquet"]))
+
+    output_file = tmp_path / "merged.parquet"
+    merge_parquet_files(manifest, output_file, rowgroup_size=3, delete_originals=True)
+
+    assert output_file.exists()
+    assert not (tmp_path / "a.parquet").exists()
+    assert not (tmp_path / "b.parquet").exists()
+    assert not manifest.exists()
 
 
 def test_validate_manifest_entries_rejects_duplicates(tmp_path, create_parquet):

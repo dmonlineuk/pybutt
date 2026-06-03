@@ -489,6 +489,41 @@ def test_importer_perform_work_with_multiple_workers(monkeypatch, tmp_path):
     assert manifest_written["tables"] == created
 
 
+def test_importer_perform_work_deletes_original_files_and_manifest(
+    monkeypatch, tmp_path
+):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+    input_path = tmp_path / "data"
+    input_path.mkdir()
+    filenames = ["a.parquet", "b.parquet"]
+    for name in filenames:
+        (input_path / name).write_text("empty")
+    manifest_path = input_path / "manifest.json"
+    manifest_path.write_text(json.dumps(filenames))
+
+    importer = Importer(
+        config=config,
+        input_path=input_path,
+        manifest_filename="manifest.json",
+        delete_originals=True,
+    )
+
+    monkeypatch.setattr(
+        importer, "import_file", lambda filename, target_table=None: None
+    )
+
+    importer.perform_work()
+
+    assert not any((input_path / name).exists() for name in filenames)
+    assert not manifest_path.exists()
+
+
 def test_importer_multi_worker_defaults_to_local_temp_tables(monkeypatch, tmp_path):
     config = SqlConfig(
         server="localhost",

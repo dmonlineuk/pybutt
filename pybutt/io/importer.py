@@ -43,6 +43,7 @@ class Importer(SqlServerIOBase):
         transaction_mode: TransactionMode = TransactionMode.BATCH,
         engine="pyodbc",
         temp_manifest_filename: str | None = None,
+        delete_files: bool = False,
     ):
         super().__init__(config)
 
@@ -70,6 +71,7 @@ class Importer(SqlServerIOBase):
                 f"engine must be one of {sorted(ENGINE_CHOICES)}"
             )
         self.engine = engine
+        self.delete_files = delete_files
 
     def load_manifest(self):
         manifest_file = self.input_path / self.manifest_filename
@@ -387,9 +389,7 @@ class Importer(SqlServerIOBase):
         return assignments
 
     def _write_temp_manifest(self, temp_tables: list[str]) -> Path:
-        manifest_path = (
-            self.input_path / f"{self.schema}_{self.table}_temp_manifest.json"
-        )
+        manifest_path = self.input_path / self.temp_manifest_filename
         with open(manifest_path, "w") as f:
             json.dump(
                 {
@@ -405,6 +405,16 @@ class Importer(SqlServerIOBase):
     def _import_files_to_temp_table(self, target_table: str, filenames: list[str]):
         for filename in filenames:
             self.import_file(filename, target_table=target_table)
+
+    def _delete_original_files(self, filenames: list[str]):
+        for filename in filenames:
+            path = self.input_path / filename
+            if path.exists():
+                path.unlink()
+
+        manifest_path = self.input_path / self.manifest_filename
+        if manifest_path.exists():
+            manifest_path.unlink()
 
     def perform_work(self):
         filenames = self.load_manifest_entries()
@@ -428,6 +438,8 @@ class Importer(SqlServerIOBase):
 
             manifest_file = self._write_temp_manifest(temp_tables)
             logging.info(f"Wrote temporary table manifest: {manifest_file}")
+            if self.delete_files:
+                self._delete_original_files(filenames)
             return
 
         with ThreadPoolExecutor(max_workers=self.worker_count) as executor:
@@ -437,6 +449,9 @@ class Importer(SqlServerIOBase):
 
             for future in as_completed(futures):
                 future.result()
+
+        if self.delete_files:
+            self._delete_original_files(filenames)
 
 
 if __name__ == "__main__":

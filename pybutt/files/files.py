@@ -253,11 +253,21 @@ def rewrite_parquet_files(
             indent=4,
         )
 
+    if (
+        delete_originals
+        and manifest_path.exists()
+        and manifest_path != new_manifest_path
+    ):
+        manifest_path.unlink()
+
     return new_manifest_path
 
 
 def merge_parquet_files(
-    manifest_path: Path, output_file: Path, rowgroup_size: int = 1_048_576
+    manifest_path: Path,
+    output_file: Path,
+    rowgroup_size: int = 1_048_576,
+    delete_originals: bool = False,
 ):
     """Merge all parquet files listed in a manifest into a single Parquet file.
 
@@ -292,6 +302,14 @@ def merge_parquet_files(
             # If schema differs, let pyarrow handle or raise downstream
             for batch in pf.iter_batches():
                 writer.write_table(pa.Table.from_batches([batch]))
+
+    if delete_originals:
+        for entry in entries:
+            src = base_dir / entry
+            if src.exists() and src != output_file:
+                src.unlink()
+        if manifest_path.exists():
+            manifest_path.unlink()
 
     return output_file
 
