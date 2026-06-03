@@ -230,20 +230,45 @@ class Exporter(SqlServerIOBase):
             )
         return pa.schema(fields)
 
+    def _write_parquet_from_record_batches(self, reader, filepath, filename):
+        try:
+            schema = reader.schema
+            with pq.ParquetWriter(
+                str(filepath.as_posix()), schema, compression="snappy"
+            ) as writer:
+                buffered_table = None
+                for batch in reader:
+                    table = pa.Table.from_batches([batch])
+                    if buffered_table is None:
+                        buffered_table = table
+                    else:
+                        buffered_table = pa.concat_tables([buffered_table, table])
+
+                    while (
+                        buffered_table is not None
+                        and buffered_table.num_rows >= self.rowgroup_size
+                    ):
+                        chunk = buffered_table.slice(0, self.rowgroup_size)
+                        writer.write_table(chunk, row_group_size=self.rowgroup_size)
+                        buffered_table = buffered_table.slice(self.rowgroup_size)
+
+                if buffered_table is None:
+                    writer.write_table(pa.Table.from_batches([], schema=schema))
+                elif buffered_table.num_rows > 0:
+                    writer.write_table(
+                        buffered_table, row_group_size=self.rowgroup_size
+                    )
+        except Exception as e:
+            raise DataExportError(
+                f"Failed exporting {filename}: {self.safe_error_message(e)}"
+            ) from e
+
     def _export_partition_with_duckdb(self, query, filepath, filename):
         with self.connection_d() as c:
             try:
-                c.execute(f"""
-                    COPY (
-                        FROM odbc_query('{self.dsn}', $$ {query} $$)
-                    )
-                    TO '{str(filepath).replace('\\', '/')}'
-                    (
-                        FORMAT parquet,
-                        COMPRESSION snappy,
-                        ROW_GROUP_SIZE {self.rowgroup_size}
-                    )
-                """)
+                result = c.execute(f"FROM odbc_query('{self.dsn}', $$ {query} $$)")
+                reader = result.arrow()
+                self._write_parquet_from_record_batches(reader, filepath, filename)
             except Exception as e:
                 raise DataExportError(
                     f"Failed exporting {filename}: {self.safe_error_message(e)}"

@@ -263,6 +263,22 @@ def rewrite_parquet_files(
     return new_manifest_path
 
 
+def _write_table_chunks(writer, table, rowgroup_size: int):
+    if table.num_rows < rowgroup_size:
+        return table
+
+    offset = 0
+    while offset + rowgroup_size <= table.num_rows:
+        chunk = table.slice(offset, rowgroup_size)
+        writer.write_table(chunk, row_group_size=rowgroup_size)
+        offset += rowgroup_size
+
+    if offset < table.num_rows:
+        return table.slice(offset)
+
+    return None
+
+
 def merge_parquet_files(
     manifest_path: Path,
     output_file: Path,
@@ -297,12 +313,25 @@ def merge_parquet_files(
     schema = first_pf.schema_arrow
 
     with pq.ParquetWriter(output_file, schema, compression="snappy") as writer:
+        buffered_table = None
+
         for entry in entries:
             src = base_dir / entry
             pf = pq.ParquetFile(src)
             # If schema differs, let pyarrow handle or raise downstream
             for batch in pf.iter_batches():
-                writer.write_table(pa.Table.from_batches([batch]))
+                table = pa.Table.from_batches([batch])
+                if buffered_table is None:
+                    buffered_table = table
+                else:
+                    buffered_table = pa.concat_tables([buffered_table, table])
+
+                buffered_table = _write_table_chunks(
+                    writer, buffered_table, rowgroup_size
+                )
+
+        if buffered_table is not None and buffered_table.num_rows > 0:
+            writer.write_table(buffered_table, row_group_size=rowgroup_size)
 
     if delete_originals:
         for entry in entries:
