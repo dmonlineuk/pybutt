@@ -51,6 +51,7 @@ class DummyImporter:
         batch_size=1000,
         transaction_mode=None,
         engine="pyodbc",
+        use_tempdb=True,
     ):
         self.config = config
         self.input_path = Path(input_path)
@@ -59,6 +60,7 @@ class DummyImporter:
         self.batch_size = batch_size
         self.transaction_mode = transaction_mode
         self.engine = engine
+        self.use_tempdb = use_tempdb
         DummyImporter.last_instance = self
 
     def perform_work(self):
@@ -243,6 +245,39 @@ def test_import_command_parses_options(monkeypatch, tmp_path):
     assert importer.worker_count == 4
     assert importer.batch_size == 2500
     assert importer.engine == "pyodbc"
+
+
+def test_import_command_accepts_no_tempdb(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Importer", DummyImporter)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    manifest = "manifest.json"
+    result = runner.invoke(
+        cli.app,
+        [
+            "import",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--input-path",
+            str(input_dir),
+            "--manifest-filename",
+            manifest,
+            "--trusted-connection",
+            "--no-tempdb",
+        ],
+    )
+
+    assert result.exit_code == 0
+    importer = DummyImporter.last_instance
+    assert importer is not None
+    assert importer.use_tempdb is False
 
 
 def test_export_command_requires_username_without_trusted_connection():

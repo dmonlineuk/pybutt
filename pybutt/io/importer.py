@@ -1,6 +1,8 @@
+import json
 import logging
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -35,6 +37,7 @@ class Importer(SqlServerIOBase):
         batch_size=1_000,
         transaction_mode: TransactionMode = TransactionMode.BATCH,
         engine="pyodbc",
+        use_tempdb: bool = True,
     ):
         super().__init__(config)
 
@@ -53,6 +56,7 @@ class Importer(SqlServerIOBase):
                 f"engine must be one of {sorted(ENGINE_CHOICES)}"
             )
         self.engine = engine
+        self.use_tempdb = use_tempdb
 
     def load_manifest(self):
         manifest_file = self.input_path / self.manifest_filename
@@ -66,24 +70,31 @@ class Importer(SqlServerIOBase):
             )
         return validate_manifest_entries(manifest, self.input_path)
 
-    def _build_insert_sql(self, columns: list[str]) -> str:
+    def _build_insert_sql(
+        self, columns: list[str], target_table: str | None = None
+    ) -> str:
         column_list = ", ".join(quote_identifier(col) for col in columns)
         placeholders = ", ".join("?" for _ in columns)
-        return (
-            f"INSERT INTO {self.full_table_name()} "
-            f"({column_list}) VALUES ({placeholders})"
-        )
+        table_name = target_table or self.full_table_name()
+        return f"INSERT INTO {table_name} " f"({column_list}) VALUES ({placeholders})"
 
     def _rows_from_batch(self, batch):
         return list(zip(*[col.to_pylist() for col in batch.columns], strict=True))
 
-    def _validate_and_build_insert(self, cur, columns, filename):
-        table_columns = self.get_table_columns(cur)
-        self.validate_schema(columns, table_columns, filename)
-        return self._build_insert_sql(columns)
+    def _validate_and_build_insert(
+        self, cur, columns, filename, target_table: str | None = None
+    ):
+        try:
+            table_columns = self.get_table_columns(cur, target_table=target_table)
+        except TypeError:
+            table_columns = self.get_table_columns(cur)
 
-    def get_table_columns(self, cur):
-        cur.execute(f"SELECT TOP 0 * FROM {self.full_table_name()}")
+        self.validate_schema(columns, table_columns, filename)
+        return self._build_insert_sql(columns, target_table=target_table)
+
+    def get_table_columns(self, cur, target_table: str | None = None):
+        target_table = target_table or self.full_table_name()
+        cur.execute(f"SELECT TOP 0 * FROM {target_table}")
         return [column[0] for column in cur.description]
 
     def validate_schema(self, parquet_columns, table_columns, filename):
@@ -100,15 +111,16 @@ class Importer(SqlServerIOBase):
                 f"  Columns in SQL but not parquet: {missing_in_parquet}"
             )
 
-    def import_file(self, filename):
+    def import_file(self, filename, target_table: str | None = None):
         filepath = self.input_path / filename
         thread_id = threading.get_ident()
         start = time.time()
+        target_table_name = target_table or self.full_table_name()
 
         logging.info(
             f"Thread={thread_id} "
             f"Importing file={filename} "
-            f"table={self.schema}.{self.table} "
+            f"table={target_table_name} "
             f"batch_size={self.batch_size} "
             f"transaction_mode={self.transaction_mode.value}"
         )
@@ -118,23 +130,33 @@ class Importer(SqlServerIOBase):
                 # For FILE mode, wrap entire operation in retry logic
                 def _file_operation():
                     if self.engine == "duckdb":
-                        return self._import_file_with_duckdb(filepath, filename, start)
-                    return self._import_file_impl(filepath, filename, start)
+                        return self._import_file_with_duckdb(
+                            filepath, filename, start, target_table=target_table
+                        )
+                    return self._import_file_impl(
+                        filepath, filename, start, target_table=target_table
+                    )
 
                 self.retry(_file_operation, context=f"Import file {filename}")
             else:
                 # For BATCH, ROWGROUP, and ROW modes, retries happen at granular level
                 if self.engine == "duckdb":
-                    self._import_file_with_duckdb(filepath, filename, start)
+                    self._import_file_with_duckdb(
+                        filepath, filename, start, target_table=target_table
+                    )
                 else:
-                    self._import_file_impl(filepath, filename, start)
+                    self._import_file_impl(
+                        filepath, filename, start, target_table=target_table
+                    )
         except Exception as e:
             logging.error(f"Failed importing {filename}: {self.safe_error_message(e)}")
             raise
 
         return True
 
-    def _import_file_impl(self, filepath, filename, start):
+    def _import_file_impl(
+        self, filepath, filename, start, target_table: str | None = None
+    ):
         """Implementation of file import with transaction management."""
         # For ROW mode, use autocommit; for others, manual commit control
         with self.connection_p(
@@ -144,7 +166,9 @@ class Importer(SqlServerIOBase):
                 cur.fast_executemany = True
                 parquet_file = pq.ParquetFile(filepath)
                 columns = parquet_file.schema.names
-                insert_sql = self._validate_and_build_insert(cur, columns, filename)
+                insert_sql = self._validate_and_build_insert(
+                    cur, columns, filename, target_table=target_table
+                )
 
                 total_rows = 0
 
@@ -197,7 +221,9 @@ class Importer(SqlServerIOBase):
                 f"SELECT * FROM read_parquet('{sanitized_path}')"
             ).fetch_arrow_table()
 
-    def _import_file_with_duckdb(self, filepath, filename, start):
+    def _import_file_with_duckdb(
+        self, filepath, filename, start, target_table: str | None = None
+    ):
         with self.connection_p(
             autocommit=(self.transaction_mode == TransactionMode.ROW)
         ) as c:
@@ -210,7 +236,9 @@ class Importer(SqlServerIOBase):
                     parquet_table = self._load_parquet_with_duckdb(filepath)
                     columns = parquet_table.schema.names
 
-                insert_sql = self._validate_and_build_insert(cur, columns, filename)
+                insert_sql = self._validate_and_build_insert(
+                    cur, columns, filename, target_table=target_table
+                )
 
                 total_rows = 0
 
@@ -318,8 +346,78 @@ class Importer(SqlServerIOBase):
                         f"{safe_msg}"
                     ) from None
 
+    def _make_temp_table_name(self, worker_index: int) -> str:
+        suffix = uuid.uuid4().hex[:8]
+        if self.use_tempdb:
+            return f"##{self.schema}_{self.table}_{worker_index+1:02d}_{suffix}"
+        return f"{self.schema}.{self.table}_{worker_index+1:02d}_{suffix}"
+
+    def _create_temp_tables(self, count: int) -> list[str]:
+        temp_tables = []
+        with self.connection_p(autocommit=True) as conn:
+            with conn.cursor() as cur:
+                for i in range(count):
+                    temp_table_name = self._make_temp_table_name(i)
+                    cur.execute(
+                        "SELECT TOP 0 * "
+                        f"INTO {temp_table_name} "
+                        f"FROM {self.full_table_name()}"
+                    )
+                    temp_tables.append(temp_table_name)
+        return temp_tables
+
+    def _assign_files_to_workers(
+        self, filenames: list[str], temp_tables: list[str]
+    ) -> dict[str, list[str]]:
+        assignments: dict[str, list[str]] = {tbl: [] for tbl in temp_tables}
+        for index, filename in enumerate(filenames):
+            target_table = temp_tables[index % len(temp_tables)]
+            assignments[target_table].append(filename)
+        return assignments
+
+    def _write_temp_manifest(self, temp_tables: list[str]) -> Path:
+        manifest_path = (
+            self.input_path / f"{self.schema}_{self.table}_temp_manifest.json"
+        )
+        with open(manifest_path, "w") as f:
+            json.dump(
+                {
+                    "version": 2,
+                    "type": "tables",
+                    "entries": temp_tables,
+                },
+                f,
+                indent=4,
+            )
+        return manifest_path
+
+    def _import_files_to_temp_table(self, target_table: str, filenames: list[str]):
+        for filename in filenames:
+            self.import_file(filename, target_table=target_table)
+
     def perform_work(self):
         filenames = self.load_manifest_entries()
+
+        if self.worker_count > 1 and len(filenames) > 1:
+            worker_count = min(self.worker_count, len(filenames))
+            temp_tables = self._create_temp_tables(worker_count)
+            assignments = self._assign_files_to_workers(filenames, temp_tables)
+
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = [
+                    executor.submit(
+                        self._import_files_to_temp_table, target_table, assigned
+                    )
+                    for target_table, assigned in assignments.items()
+                    if assigned
+                ]
+
+                for future in as_completed(futures):
+                    future.result()
+
+            manifest_file = self._write_temp_manifest(temp_tables)
+            logging.info(f"Wrote temporary table manifest: {manifest_file}")
+            return
 
         with ThreadPoolExecutor(max_workers=self.worker_count) as executor:
             futures = [

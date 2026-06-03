@@ -363,6 +363,14 @@ def import_data(
             "recommended), rowgroup (per row group), file (entire file)."
         ),
     ),
+    no_tempdb: bool = typer.Option(
+        False,
+        "--no-tempdb",
+        help=(
+            "Use local temp tables similar to the target table name instead of "
+            "global temp tables in tempdb."
+        ),
+    ),
 ) -> None:
     """Import Parquet files into a SQL Server table.
 
@@ -395,6 +403,7 @@ def import_data(
         batch_size=batch_size,
         transaction_mode=transaction_mode,
         engine=engine.lower(),
+        use_tempdb=not no_tempdb,
     )
     importer.perform_work()
     typer.secho("Import completed successfully.", fg=typer.colors.GREEN)
