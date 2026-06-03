@@ -3,10 +3,9 @@ from __future__ import annotations
 import getpass
 import json
 import logging
+import tomllib
 from pathlib import Path
 
-import pyarrow as pa
-import pyarrow.parquet as pq
 import typer
 from typer.testing import CliRunner
 
@@ -30,14 +29,35 @@ runner = CliRunner()
 app = typer.Typer(
     context_settings={"help_option_names": ["-?", "--help"]},
     help="""
-PyButt CLI for exporting SQL Server tables to Parquet files and importing
-Parquet data back into SQL Server.
-
-Commands:
-  export   Export SQL Server data to one or more Parquet files.
-  import   Import Parquet files into a SQL Server table using a manifest.
+PyButt CLI for exporting and importing between MS SQL Server tables and Parquet
+files. Can also be used for inspecting Parquet files and merging files or tables
+based on manifest definitions.
 """,
 )
+
+
+def _get_project_version() -> str:
+    p = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    return tomllib.loads(p.read_text(encoding="utf-8"))["project"]["version"]
+
+
+def _version_callback(ctx, param, value: bool):
+    if not value or ctx.resilient_parsing:
+        return
+    typer.echo("PyButt version: ", nl=False)
+    typer.echo(_get_project_version())
+    raise typer.Exit()
+
+
+@app.callback(invoke_without_command=True)
+def _main_callback(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        False, "--version", "-v", callback=_version_callback, is_eager=True
+    ),
+):
+    """PyButt CLI root callback."""
+    return
 
 
 def parse_columns(columns: str | None) -> list[str] | None:
@@ -66,7 +86,7 @@ def build_sql_config(
     if not trusted_connection:
         if not username:
             raise typer.BadParameter(
-                "username is required unless --trusted-connection is used"
+                "--username is required unless --trusted-connection is used"
             )
 
         # Prompt for password if not provided
@@ -153,19 +173,19 @@ def export(
     trust_cert: bool = typer.Option(  # noqa: B008
         False,
         "--trust-cert",
-        "-tc",
+        "-c",
         help="Trust the SQL Server TLS certificate.",
     ),
     encrypt: bool = typer.Option(  # noqa: B008
         True,
         "--encrypt/--no-encrypt",
-        "-e/-ne",
+        "-e/-n",
         help="Enable or disable SQL Server encrypted transport.",
     ),
     retries: int = typer.Option(  # noqa: B008
         3,
         "--retries",
-        "-rc",
+        "-r",
         help="Number of retry attempts for transient SQL errors.",
         min=1,
     ),
@@ -178,34 +198,34 @@ def export(
     columns: str | None = typer.Option(  # noqa: B008
         None,
         "--columns",
-        "-c",
+        "-C",
         help="Comma-separated list of columns to export. Defaults to all columns.",
     ),
     worker_count: int = typer.Option(  # noqa: B008
         1,
         "--worker-count",
-        "-wc",
+        "-w",
         help="Number of worker processes used for export.",
         min=1,
     ),
     file_count: int = typer.Option(  # noqa: B008
         1,
         "--file-count",
-        "-fc",
+        "-f",
         help="Number of Parquet output files.",
         min=1,
     ),
     rowgroup_size: int = typer.Option(  # noqa: B008
         1_048_576,
         "--rowgroup-size",
-        "-rs",
+        "-R",
         help="Number of rows per rowgroup in the Parquet files.",
         min=1,
     ),
     fetch_size: int | None = typer.Option(  # noqa: B008
         None,
         "--fetch-size",
-        "-fs",
+        "-F",
         help=(
             "Cursor fetch size for pyodbc export. "
             "Defaults to min(max(1024, rowgroup_size), 8192)."
@@ -303,7 +323,7 @@ def import_data(
     temp_manifest_filename: str | None = typer.Option(
         None,
         "--output-manifest-filename",
-        "-om",
+        "-o",
         help=(
             "Override the temporary worker manifest filename written during "
             "multi-worker import. Defaults to <schema>_<table>_temp_manifest.json."
@@ -336,26 +356,26 @@ def import_data(
     trust_cert: bool = typer.Option(  # noqa: B008
         False,
         "--trust-cert",
-        "-tc",
+        "-c",
         help="Trust the SQL Server TLS certificate.",
     ),
     encrypt: bool = typer.Option(  # noqa: B008
         True,
         "--encrypt/--no-encrypt",
-        "-e/-ne",
+        "-e/-n",
         help="Enable or disable SQL Server encrypted transport.",
     ),
     retries: int = typer.Option(  # noqa: B008
         3,
         "--retries",
-        "-rc",
+        "-r",
         help="Number of retry attempts for transient SQL errors.",
         min=1,
     ),
     worker_count: int = typer.Option(  # noqa: B008
         1,
         "--worker-count",
-        "-wc",
+        "-w",
         help="Number of parallel import threads.",
         min=1,
     ),
@@ -382,7 +402,7 @@ def import_data(
     transaction_mode: TransactionMode = typer.Option(  # noqa: B008
         TransactionMode.BATCH,
         "--transaction-mode",
-        "-tm",
+        "-M",
         help=(
             "Transaction scope: row (no transaction, auto-commit), batch (per batch, "
             "recommended), rowgroup (per row group), file (entire file)."
@@ -391,7 +411,7 @@ def import_data(
     delete_files: bool = typer.Option(
         False,
         "--delete-files",
-        "-f",
+        "-x",
         help=("Delete source parquet files and the manifest after import."),
     ),
 ) -> None:
@@ -457,11 +477,11 @@ def merge(
     delete_files: bool = typer.Option(
         False,
         "--delete-files",
-        "-f",
+        "-x",
         help=("Delete source parquet files and the manifest after merging."),
     ),
     rowgroup_size: int = typer.Option(  # noqa: B008
-        1_048_576, "--rowgroup-size", "-rs", help="Rowgroup size for output."
+        1_048_576, "--rowgroup-size", "-R", help="Rowgroup size for output."
     ),
     # SQL merge options (target)
     server: str | None = typer.Option(
@@ -484,11 +504,9 @@ def merge(
     driver: str = typer.Option(  # noqa: B008
         "ODBC Driver 18 for SQL Server", "--driver", "-D", help="ODBC driver name."
     ),
-    trust_cert: bool = typer.Option(False, "--trust-cert", "-tc"),  # noqa: B008
-    encrypt: bool = typer.Option(
-        True, "--encrypt/--no-encrypt", "-e/-ne"
-    ),  # noqa: B008
-    retries: int = typer.Option(3, "--retries", "-rc", min=1),  # noqa: B008
+    trust_cert: bool = typer.Option(False, "--trust-cert", "-c"),  # noqa: B008
+    encrypt: bool = typer.Option(True, "--encrypt/--no-encrypt", "-e/-n"),  # noqa: B008
+    retries: int = typer.Option(3, "--retries", "-r", min=1),  # noqa: B008
     verbose: bool = typer.Option(False, "--verbose", "-v"),  # noqa: B008
 ) -> None:
     """Merge manifest entries according to manifest type."""
@@ -575,13 +593,13 @@ def inspect_command(
 def rewrite_command(
     manifest: Path = typer.Argument(...),  # noqa: B008
     outdir: Path = typer.Option(  # noqa: B008
-        None, "--outdir", "-o", help="Output directory"
+        None, "--output-path", "-o", help="Output directory"
     ),
-    rowgroup_size: int = typer.Option(..., "--rowgroup-size", "-r"),  # noqa: B008
+    rowgroup_size: int = typer.Option(..., "--rowgroup-size", "-R"),  # noqa: B008
     new_manifest: str | None = typer.Option(  # noqa: B008
         None,
         "--new-manifest",
-        "-n",
+        "-m",
         help=(
             "Optional filename for the rewritten manifest. Defaults to "
             "<manifest>_new.json based on the original manifest name."
@@ -590,7 +608,7 @@ def rewrite_command(
     delete_files: bool = typer.Option(
         False,
         "--delete-files",
-        "-f",
+        "-x",
         help=("Delete source parquet files and the manifest after merge."),
     ),  # noqa: B008
 ):
@@ -604,49 +622,6 @@ def rewrite_command(
         new_manifest,
         delete_originals=delete_files,
     )
-
-
-def create_parquet(tmp_path: Path, name: str, rows=10, rowgroup_size=5):
-    data = {
-        "id": list(range(rows)),
-        "value": [f"v{i}" for i in range(rows)],
-    }
-    table = pa.Table.from_pydict(data)
-    file_path = tmp_path / name
-    pq.write_table(table, file_path, row_group_size=rowgroup_size)
-    return file_path
-
-
-def test_cli_rewrite_default_outdir(tmp_path):
-    create_parquet(tmp_path, "x.parquet", rows=8, rowgroup_size=2)
-
-    manifest = tmp_path / "manifest.json"
-    with open(manifest, "w") as f:
-        json.dump(["x.parquet"], f)
-
-    result = runner.invoke(
-        app,
-        [
-            "files",
-            "rewrite",
-            str(manifest),
-            "--rowgroup-size",
-            "4",
-            "--new-manifest",
-            "manifest_new.json",
-        ],
-    )
-
-    assert result.exit_code == 0
-
-    # Check new file exists
-    new_file = tmp_path / "x_new.parquet"
-    assert new_file.exists()
-
-    # Check manifest
-    with open(tmp_path / "manifest_new.json") as f:
-        files = json.load(f)
-    assert files == ["x_new.parquet"]
 
 
 if __name__ == "__main__":
