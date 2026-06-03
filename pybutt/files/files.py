@@ -77,6 +77,19 @@ def _validate_table_name(value):
     return value
 
 
+def default_manifest_filename(schema: str, table: str, suffix: str = "manifest") -> str:
+    return f"{schema}_{table}_{suffix}.json"
+
+
+def default_temp_manifest_filename(schema: str, table: str) -> str:
+    return f"{schema}_{table}_temp_manifest.json"
+
+
+def default_rewrite_manifest_filename(manifest_path: Path) -> str:
+    manifest_path = Path(manifest_path)
+    return f"{manifest_path.stem}_new{manifest_path.suffix}"
+
+
 def load_manifest(manifest_path: str | Path) -> dict:
     manifest_path = Path(manifest_path)
 
@@ -189,7 +202,7 @@ def rewrite_parquet_files(
     manifest_path: Path,
     output_dir: Path | None,
     new_rowgroup_size: int,
-    new_manifest_name: str,
+    new_manifest_name: str | None = None,
     delete_originals: bool = False,
 ):
     """
@@ -209,6 +222,10 @@ def rewrite_parquet_files(
         raise UnsupportedManifestTypeError(
             f"Rewrite only supports file manifests, got: {manifest['type']}"
         )
+
+    new_manifest_name = new_manifest_name or default_rewrite_manifest_filename(
+        manifest_path
+    )
 
     new_files = []
 

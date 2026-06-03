@@ -36,6 +36,7 @@ class DummyExporter:
         rowgroup_size=1_048_576,
         fetch_size=None,
         engine="duckdb",
+        manifest_filename=None,
     ):
         self.config = config
         self.output_path = Path(output_path)
@@ -46,6 +47,7 @@ class DummyExporter:
         self.rowgroup_size = rowgroup_size
         self.fetch_size = fetch_size
         self.engine = engine
+        self.manifest_filename = manifest_filename
         DummyExporter.last_instance = self
 
     def perform_work(self):
@@ -64,14 +66,18 @@ class DummyImporter:
         batch_size=1000,
         transaction_mode=None,
         engine="pyodbc",
+        use_tempdb=True,
+        temp_manifest_filename=None,
     ):
         self.config = config
         self.input_path = Path(input_path)
         self.manifest_filename = manifest_filename
+        self.temp_manifest_filename = temp_manifest_filename
         self.worker_count = worker_count
         self.batch_size = batch_size
         self.transaction_mode = transaction_mode
         self.engine = engine
+        self.use_tempdb = use_tempdb
         DummyImporter.last_instance = self
 
     def perform_work(self):
@@ -258,6 +264,54 @@ def test_import_command_parses_options(monkeypatch, tmp_path):
     assert importer.engine == "pyodbc"
 
 
+def test_export_command_passes_manifest_filename(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Exporter", DummyExporter)
+
+    output_dir = tmp_path / "out"
+    result = runner.invoke(
+        cli.app,
+        [
+            "export",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--output-path",
+            str(output_dir),
+            "--trusted-connection",
+            "--manifest-filename",
+            "custom_manifest.json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    exporter = DummyExporter.last_instance
+    assert exporter.manifest_filename == "custom_manifest.json"
+
+
+def test_import_command_uses_default_manifest_filename(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Importer", DummyImporter)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    result = runner.invoke(
+        cli.app,
+        [
+            "import",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--input-path",
+            str(input_dir),
 def test_merge_command_files_invokes_merge_helper(
     monkeypatch, tmp_path, create_parquet
 ):
@@ -287,6 +341,20 @@ def test_merge_command_files_invokes_merge_helper(
     )
 
     assert result.exit_code == 0
+    importer = DummyImporter.last_instance
+    assert importer.manifest_filename is None
+
+
+def test_import_command_accepts_no_tempdb(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Importer", DummyImporter)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    manifest = "manifest.json"
+    result = runner.invoke(
+        cli.app,
+        [
+            "import",
     assert "File merge completed successfully" in result.output
     assert called["args"] == (manifest, output_file, 1048576)
 
@@ -312,12 +380,55 @@ def test_merge_command_tables_invokes_table_merger(monkeypatch, tmp_path):
             "--schema",
             "dbo",
             "--table",
+            "MyTable",
+            "--input-path",
+            str(input_dir),
+            "--manifest-filename",
+            manifest,
+            "--trusted-connection",
+            "--no-tempdb",
             "TargetTable",
             "--trusted-connection",
         ],
     )
 
     assert result.exit_code == 0
+    importer = DummyImporter.last_instance
+    assert importer is not None
+    assert importer.use_tempdb is False
+
+
+def test_import_command_passes_temp_manifest_filename(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Importer", DummyImporter)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    manifest = "manifest.json"
+    result = runner.invoke(
+        cli.app,
+        [
+            "import",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--input-path",
+            str(input_dir),
+            "--manifest-filename",
+            manifest,
+            "--trusted-connection",
+            "--temp-manifest-filename",
+            "custom_temp_manifest.json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    importer = DummyImporter.last_instance
+    assert importer.temp_manifest_filename == "custom_temp_manifest.json"
     assert "Table merge completed successfully" in result.output
     merger = DummyMerger.last_instance
     assert merger is not None
@@ -575,6 +686,27 @@ def test_cli_files_inspect(tmp_path, create_parquet):
     assert "x.parquet" in result.stdout
     assert "rows: 8" in result.stdout
     assert "row groups: 2" in result.stdout
+
+
+def test_cli_rewrite_defaults_manifest_name(tmp_path, create_parquet):
+    create_parquet(tmp_path, "x.parquet", rows=8, rowgroup_size=2)
+
+    manifest = tmp_path / "manifest.json"
+    with open(manifest, "w") as f:
+        json.dump(["x.parquet"], f)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "rewrite",
+            str(manifest),
+            "--rowgroup-size",
+            "4",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert (tmp_path / "manifest_new.json").exists()
 
 
 def test_cli_files_inspect_verbose(tmp_path, create_parquet):

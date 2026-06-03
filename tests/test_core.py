@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -306,6 +307,41 @@ def test_importer_load_manifest_missing_file(tmp_path):
         importer.load_manifest_entries()
 
 
+def test_importer_default_manifest_filename():
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+    importer = Importer(
+        config=config,
+        input_path=Path("./data"),
+        manifest_filename=None,
+    )
+    assert importer.manifest_filename == "dbo_MyTable_manifest.json"
+
+
+def test_importer_make_temp_table_name_local():
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="users",
+        trusted_connection=True,
+    )
+    importer = Importer(
+        config=config,
+        input_path=Path("./data"),
+        manifest_filename="manifest.json",
+        use_tempdb=False,
+    )
+    name = importer._make_temp_table_name(0)
+    assert name.startswith("dbo.users_01_")
+    assert name.count(".") == 1
+
+
 def test_importer_validate_schema_mismatch():
     config = SqlConfig(
         server="localhost",
@@ -321,3 +357,86 @@ def test_importer_validate_schema_mismatch():
     )
     with pytest.raises(ValueError, match="Schema mismatch"):
         importer.validate_schema(["a", "b"], ["b", "c"], "part_00000.parquet")
+
+
+def test_importer_write_temp_manifest(tmp_path):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+    input_path = tmp_path / "data"
+    input_path.mkdir()
+    importer = Importer(
+        config=config,
+        input_path=input_path,
+        manifest_filename="manifest.json",
+    )
+
+    temp_tables = ["##dbo_MyTable_01_abcd1234", "##dbo_MyTable_02_efgh5678"]
+    manifest_file = importer._write_temp_manifest(temp_tables)
+
+    assert manifest_file.exists()
+    assert manifest_file.parent == input_path
+    with open(manifest_file) as f:
+        data = json.load(f)
+
+    assert data == {
+        "version": 2,
+        "type": "tables",
+        "entries": temp_tables,
+    }
+
+
+def test_importer_perform_work_with_multiple_workers(monkeypatch, tmp_path):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+    input_path = tmp_path / "data"
+    input_path.mkdir()
+    filenames = ["a.parquet", "b.parquet", "c.parquet"]
+    for name in filenames:
+        (input_path / name).write_text("empty")
+    manifest_path = input_path / "manifest.json"
+    manifest_path.write_text(json.dumps(filenames))
+
+    importer = Importer(
+        config=config,
+        input_path=input_path,
+        manifest_filename="manifest.json",
+        worker_count=2,
+    )
+
+    created = ["##dbo_MyTable_01_abcd1234", "##dbo_MyTable_02_efgh5678"]
+    monkeypatch.setattr(importer, "_create_temp_tables", lambda count: created)
+
+    calls = {}
+
+    def fake_import_files_to_temp_table(target_table, assigned):
+        calls[target_table] = assigned
+
+    monkeypatch.setattr(
+        importer, "_import_files_to_temp_table", fake_import_files_to_temp_table
+    )
+
+    manifest_written = {}
+
+    def fake_write_temp_manifest(temp_tables):
+        manifest_written["tables"] = temp_tables
+        return input_path / "dummy.json"
+
+    monkeypatch.setattr(importer, "_write_temp_manifest", fake_write_temp_manifest)
+
+    importer.perform_work()
+
+    assert calls == {
+        "##dbo_MyTable_01_abcd1234": ["a.parquet", "c.parquet"],
+        "##dbo_MyTable_02_efgh5678": ["b.parquet"],
+    }
+    assert manifest_written["tables"] == created

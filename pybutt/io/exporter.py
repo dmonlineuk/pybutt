@@ -23,6 +23,7 @@ from pybutt.exceptions import (
     EngineSelectionError,
     TableEmptyError,
 )
+from pybutt.files.files import default_manifest_filename
 
 logging.basicConfig(level=logging.INFO)
 
@@ -39,6 +40,7 @@ class Exporter(SqlServerIOBase):
         rowgroup_size=1_048_576,
         fetch_size=None,
         engine="duckdb",
+        manifest_filename: str | None = None,
     ):
         super().__init__(config)
 
@@ -68,6 +70,11 @@ class Exporter(SqlServerIOBase):
 
         self.output_path = Path(output_path)
         self.output_path.mkdir(parents=True, exist_ok=True)
+        self.manifest_filename = (
+            manifest_filename
+            if manifest_filename
+            else default_manifest_filename(self.schema, self.table)
+        )
 
         self.total_rows = 0
         self.partition_count = 0
@@ -371,8 +378,7 @@ class Exporter(SqlServerIOBase):
 
     def perform_work(self):
         start = time.time()
-        safe_name = f"{self.schema}_{self.table}"
-        manifest_file = self.output_path / f"{safe_name}_manifest.json"
+        manifest_file = self.output_path / self.manifest_filename
 
         with get_context("spawn").Pool(self.worker_count) as p:
             filenames = p.map(self.export_partition, range(self.partition_count))
