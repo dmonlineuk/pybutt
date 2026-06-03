@@ -511,7 +511,7 @@ def test_importer_perform_work_deletes_original_files_and_manifest(
         config=config,
         input_path=input_path,
         manifest_filename="manifest.json",
-        delete_originals=True,
+        delete_files=True,
     )
 
     monkeypatch.setattr(

@@ -268,6 +268,7 @@ def merge_parquet_files(
     output_file: Path,
     rowgroup_size: int = 1_048_576,
     delete_originals: bool = False,
+    new_manifest_name: str | None = None,
 ):
     """Merge all parquet files listed in a manifest into a single Parquet file.
 
@@ -310,6 +311,22 @@ def merge_parquet_files(
                 src.unlink()
         if manifest_path.exists():
             manifest_path.unlink()
+
+    # Write a manifest for the merged output (single entry)
+    new_manifest_name = (
+        new_manifest_name or f"{manifest_path.stem}_merged{manifest_path.suffix}"
+    )
+    new_manifest_path = base_dir / new_manifest_name
+    with open(new_manifest_path, "w") as f:
+        json.dump(
+            {
+                "version": MANIFEST_VERSION_2,
+                "type": "files",
+                "entries": [output_file.name],
+            },
+            f,
+            indent=4,
+        )
 
     return output_file
 

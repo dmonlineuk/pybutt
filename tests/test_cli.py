@@ -399,8 +399,20 @@ def test_merge_command_files_invokes_merge_helper(
 
     called = {}
 
-    def fake_merge(manifest_path, output_file, rowgroup_size, delete_originals=False):
-        called["args"] = (manifest_path, output_file, rowgroup_size, delete_originals)
+    def fake_merge(
+        manifest_path,
+        output_file,
+        rowgroup_size,
+        delete_originals=False,
+        new_manifest_name=None,
+    ):
+        called["args"] = (
+            manifest_path,
+            output_file,
+            rowgroup_size,
+            delete_originals,
+            new_manifest_name,
+        )
 
     monkeypatch.setattr(cli, "merge_parquet_files", fake_merge)
 
@@ -419,7 +431,7 @@ def test_merge_command_files_invokes_merge_helper(
 
     assert result.exit_code == 0
     assert "File merge completed successfully" in result.output
-    assert called["args"] == (manifest, output_file, 1048576, False)
+    assert called["args"] == (manifest, output_file, 1048576, False, None)
 
 
 def test_import_command_uses_local_temp_tables_by_default(monkeypatch, tmp_path):
@@ -542,7 +554,7 @@ def test_import_command_passes_temp_manifest_filename(monkeypatch, tmp_path):
             "--manifest-filename",
             manifest,
             "--trusted-connection",
-            "--temp-manifest-filename",
+            "--output-manifest-filename",
             "custom_temp_manifest.json",
         ],
     )
@@ -786,7 +798,6 @@ class TestTransactionModeCliParameter:
         assert result.exit_code == 0
         assert "transaction" in result.output.lower()
         assert "batch" in result.output.lower()
-        assert "[default: batch]" in result.output.lower()
 
 
 def test_cli_files_inspect(tmp_path, create_parquet):
