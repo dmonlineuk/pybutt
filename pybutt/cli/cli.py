@@ -215,6 +215,14 @@ def export(
         help="Number of Parquet output files.",
         min=1,
     ),
+    parameters: str | None = typer.Option(
+        None,
+        "--parameters",
+        help=(
+            "Comma-separated list of parameter values to pass to a table-valued "
+            "function. Example: --parameters 12,'fred','1989'."
+        ),
+    ),
     rowgroup_size: int = typer.Option(  # noqa: B008
         1_048_576,
         "--rowgroup-size",
@@ -280,6 +288,7 @@ def export(
         fetch_size=fetch_size,
         engine=engine.lower(),
         manifest_filename=manifest_filename,
+        parameters=parameters,
     )
     exporter.perform_work()
     typer.secho("Export completed successfully.", fg=typer.colors.GREEN)
