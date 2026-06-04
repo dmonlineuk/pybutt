@@ -33,7 +33,7 @@ odbcinst -q -d
 
 ### Windows
 
-Install these packages using winget, and ensure ExecutionPolicy to activate your virtual environment:
+Install these packages using winget, and set the PowerShell ExecutionPolicy so you can activate your virtual environment:
 
 ```pwsh
 winget install -e --id Microsoft.msodbcsql.18
@@ -58,7 +58,7 @@ PyButt uses `pyproject.toml` as the source of truth for runtime dependencies and
 ```bash
 git clone https://github.com/dmonlineuk/pybutt && cd pybutt
 python -m venv .venv
-source .venv/bin/activate  # On Windows: `. .venv\Scripts\activate`
+source .venv/bin/activate  # On Windows: `.venv\Scripts\Activate.ps1`
 python -m pip install --upgrade pip
 pip install -e .
 ```
@@ -117,10 +117,10 @@ pybutt export \
 --columns,              -C      Comma-separated list of columns to export (all by default)
 --worker-count,         -w      Number of worker processes (default: 1)
 --file-count,           -f      Number of output Parquet files (default: 1)
---rowgroup-size,        -R      Number of rows per rowgroup inside each Parquet file (default 1048576)
+--rowgroup-size,        -R      Number of rows per rowgroup inside each Parquet file (default: 1048576)
 --fetch-size,           -F      Cursor fetch size for pyodbc export (default: min(max(1024, rowgroup_size), 8192))
 --engine,               -E      Export engine to use: duckdb or pyodbc (default: duckdb)
---parameters,           --parameters  Comma-separated list of parameter values to pass to a table-valued function (e.g. 12,'fred','1989')
+--parameters                    Comma-separated list of parameter values to pass to a table-valued function (e.g. 12,'fred','1989')
 --verbose,              -v      Show verbose logging output
 ```
 
@@ -320,18 +320,6 @@ pybutt import \
   --manifest-filename data_manifest.json \
   --username dbuser \
   --transaction-mode row
-```
-
-Import with row group transactions:
-```bash
-pybutt import \
-  --server sqlserver.example.com \
-  --database MyDatabase \
-  --table LargeTable \
-  --input-path ./imports/data \
-  --manifest-filename data_manifest.json \
-  --username dbuser \
-  --transaction-mode rowgroup
 ```
 
 #### Merge Command
@@ -618,13 +606,47 @@ print("✓ Import complete")
 
 When exporting, PyButt automatically creates a manifest JSON file listing all generated Parquet files. This manifest is required for importing:
 
-**Example manifest** (`dbo_MyTable_manifest.json`):
+As of version 2, a manifest is a JSON object with a `version`, a `type`, and an
+`entries` list. Two manifest types are supported:
+
+- **`files`** — `entries` are Parquet file names (written by `export`, `rewrite`,
+  and file `merge`).
+- **`tables`** — `entries` are SQL Server table names (written during multi-worker
+  `import` and table `merge`, for consumption by the `merge` command).
+
+**Example file manifest** (`dbo_MyTable_manifest.json`):
+```json
+{
+    "version": 2,
+    "type": "files",
+    "entries": [
+        "dbo_MyTable_part_00000.parquet",
+        "dbo_MyTable_part_00001.parquet",
+        "dbo_MyTable_part_00002.parquet",
+        "dbo_MyTable_part_00003.parquet"
+    ]
+}
+```
+
+**Example table manifest** (`dbo_MyTable_temp_manifest.json`):
+```json
+{
+    "version": 2,
+    "type": "tables",
+    "entries": [
+        "dbo.MyTable_01_a1b2c3d4",
+        "dbo.MyTable_02_e5f6a7b8"
+    ]
+}
+```
+
+For backwards compatibility, legacy version 1 manifests — a plain JSON array of
+Parquet file names — are still accepted when reading and are treated as a `files`
+manifest:
 ```json
 [
     "dbo_MyTable_part_00000.parquet",
-    "dbo_MyTable_part_00001.parquet",
-    "dbo_MyTable_part_00002.parquet",
-    "dbo_MyTable_part_00003.parquet"
+    "dbo_MyTable_part_00001.parquet"
 ]
 ```
 
@@ -644,7 +666,7 @@ The `--transaction-mode` option controls how data is committed during import and
 | **batch** | Each batch of `batch_size` rows commits together | Per-batch retry | **Recommended for most use cases** | Fast, limited lock duration, failed batches retry independently | Rare edge case: partial batch on non-retryable error |
 | **rowgroup** | Each Parquet row group commits together | Per-rowgroup retry | Rowgroup granularity with safe retries | Row group boundary safety, independent rowgroup retries | Longer locks than batch mode, fewer retry opportunities |
 | **file** | Entire file in one transaction | Entire file retry | Production, critical data | All-or-nothing atomicity, complete data integrity | Can hold locks longer on large files, if failure occurs entire file retries |
-| **row** | Each row auto-commits immediately | No retries (unsafe with autocommit) | Non-critical data, testing - **Not recommended** | Minimum speed, zero locking | Partial loads on error, no rollback, autocommit prevents safe retries |
+| **row** | Each row auto-commits immediately | No retries (unsafe with autocommit) | Non-critical data, testing - **Not recommended** | Zero lock contention | Partial loads on error, no rollback, autocommit prevents safe retries |
 
 **Retry Behavior:**
 - **batch/rowgroup modes**: When a batch or rowgroup fails, only that unit is rolled back and retried (up to `--retries` times). Already-committed units remain intact.
@@ -666,7 +688,7 @@ pybutt import \
 ```
 
 **Choosing a mode:**
-- **Default**: Use `batch` (default) — minimal data safety safety and performance, but better chance of limited lock duration
+- **Default**: Use `batch` (default) — minimal data safety and performance, but better chance of limited lock duration
 - **Production/Critical Data with High Volume**: Use `rowgroup` for a balance between data safety, locking/blocking and speed
 - **Safety-Critical (Small Files)**: Use `file` for complete all-or-nothing atomicity per file, but high chance of locking/blocking
 - **Performance-Only, Non-Critical**: Use `row` for implicit transactions to prevent locking, but slow, and no data safety. **Not recommended**
