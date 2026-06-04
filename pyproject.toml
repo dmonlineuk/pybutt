@@ -12,6 +12,7 @@ dependencies = [
     "pyodbc",
     "pyarrow",
     "duckdb",
+    "mssql-python",
 ]
 
 [project.optional-dependencies]

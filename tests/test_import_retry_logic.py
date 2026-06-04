@@ -603,3 +603,183 @@ class TestErrorMessageRedaction:
 
         assert "Pwd=***" in str(exc_info.value)
         assert "secret_password" not in str(exc_info.value)
+
+
+class TestMssqlPythonBulkcopyRetry:
+    """Test retry logic for the mssql-python bulkcopy path."""
+
+    @pytest.fixture
+    def importer_mssql_batch(self, tmp_path, mock_config):
+        """Create an Importer with mssql-python engine and BATCH mode."""
+        return Importer(
+            config=mock_config,
+            input_path=tmp_path,
+            manifest_filename="manifest.json",
+            batch_size=1000,
+            transaction_mode=TransactionMode.BATCH,
+            engine="mssql-python",
+        )
+
+    @pytest.fixture
+    def importer_mssql_rowgroup(self, tmp_path, mock_config):
+        """Create an Importer with mssql-python engine and ROWGROUP mode."""
+        return Importer(
+            config=mock_config,
+            input_path=tmp_path,
+            manifest_filename="manifest.json",
+            batch_size=1000,
+            transaction_mode=TransactionMode.ROWGROUP,
+            engine="mssql-python",
+        )
+
+    def test_mssql_bulkcopy_succeeds_on_first_attempt(self, importer_mssql_batch):
+        """Test that bulkcopy is committed successfully on first attempt."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.bulkcopy.return_value = {"rows_copied": 3, "batch_count": 1}
+
+        rows = [(1, "a"), (2, "b"), (3, "c")]
+        columns = ["id", "name"]
+
+        with patch("time.sleep"):
+            result = importer_mssql_batch._mssql_bulkcopy_with_retry(
+                mock_conn,
+                rows,
+                columns,
+                "[dbo].[MyTable]",
+                "test_file.parquet",
+                context="batch in test_file.parquet",
+                is_rows=True,
+            )
+
+        assert result == 3
+        mock_cursor.bulkcopy.assert_called_once_with(
+            "[dbo].[MyTable]",
+            rows,
+            column_mappings=columns,
+        )
+        mock_conn.commit.assert_called_once()
+
+    def test_mssql_bulkcopy_retries_on_failure(self, importer_mssql_batch):
+        """Test that bulkcopy retries and succeeds on second attempt."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.bulkcopy.side_effect = [
+            Exception("Connection timeout"),
+            {"rows_copied": 2, "batch_count": 1},
+        ]
+
+        rows = [(1, "a"), (2, "b")]
+        columns = ["id", "name"]
+
+        with patch("time.sleep"):
+            result = importer_mssql_batch._mssql_bulkcopy_with_retry(
+                mock_conn,
+                rows,
+                columns,
+                "[dbo].[MyTable]",
+                "test_file.parquet",
+                context="batch in test_file.parquet",
+                is_rows=True,
+            )
+
+        assert result == 2
+        assert mock_cursor.bulkcopy.call_count == 2
+        mock_conn.rollback.assert_called_once()
+
+    def test_mssql_bulkcopy_exhausts_retries(self, importer_mssql_batch):
+        """Test that bulkcopy fails after exhausting retries."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.bulkcopy.side_effect = Exception("Persistent error")
+
+        rows = [(1, "a")]
+        columns = ["id", "name"]
+
+        from pybutt.exceptions import BatchImportError
+
+        with patch("time.sleep"):
+            with pytest.raises(BatchImportError, match="Bulk copy failed after 3"):
+                importer_mssql_batch._mssql_bulkcopy_with_retry(
+                    mock_conn,
+                    rows,
+                    columns,
+                    "[dbo].[MyTable]",
+                    "test_file.parquet",
+                    context="batch in test_file.parquet",
+                    is_rows=True,
+                )
+
+        assert mock_cursor.bulkcopy.call_count == 3
+        assert mock_conn.rollback.call_count == 2
+
+    def test_mssql_bulkcopy_with_arrow_table(self, importer_mssql_batch):
+        """Test that bulkcopy handles PyArrow table input correctly."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.bulkcopy.return_value = {"rows_copied": 2, "batch_count": 1}
+
+        table = pa.table({"id": [1, 2], "name": ["a", "b"]})
+        columns = ["id", "name"]
+
+        with patch("time.sleep"):
+            result = importer_mssql_batch._mssql_bulkcopy_with_retry(
+                mock_conn,
+                table,
+                columns,
+                "[dbo].[MyTable]",
+                "test_file.parquet",
+                context="batch in test_file.parquet",
+                is_rows=False,
+            )
+
+        assert result == 2
+        mock_cursor.bulkcopy.assert_called_once()
+
+    def test_mssql_import_file_batch_mode(self, importer_mssql_batch, tmp_path):
+        """Test full import_file flow with mssql-python BATCH mode."""
+        table = pa.table({"id": [1, 2, 3], "name": ["a", "b", "c"]})
+        filepath = tmp_path / "test.parquet"
+        pq.write_table(table, str(filepath))
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.execute.return_value = mock_cursor
+        mock_cursor.description = [("id",), ("name",)]
+        mock_cursor.bulkcopy.return_value = {"rows_copied": 3, "batch_count": 1}
+
+        with patch.object(importer_mssql_batch, "connection_m", return_value=mock_conn):
+            importer_mssql_batch._import_file_with_mssql(
+                filepath, "test.parquet", time.time()
+            )
+
+        mock_cursor.bulkcopy.assert_called()
+        mock_conn.commit.assert_called()
+
+    def test_mssql_import_file_rowgroup_mode(self, importer_mssql_rowgroup, tmp_path):
+        """Test full import_file flow with mssql-python ROWGROUP mode."""
+        table = pa.table({"id": [1, 2, 3], "name": ["a", "b", "c"]})
+        filepath = tmp_path / "test.parquet"
+        pq.write_table(table, str(filepath))
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.execute.return_value = mock_cursor
+        mock_cursor.description = [("id",), ("name",)]
+        mock_cursor.bulkcopy.return_value = {"rows_copied": 3, "batch_count": 1}
+
+        with patch.object(
+            importer_mssql_rowgroup, "connection_m", return_value=mock_conn
+        ):
+            importer_mssql_rowgroup._import_file_with_mssql(
+                filepath, "test.parquet", time.time()
+            )
+
+        mock_cursor.bulkcopy.assert_called()
+        mock_conn.commit.assert_called()

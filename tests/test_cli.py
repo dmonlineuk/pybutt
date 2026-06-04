@@ -371,6 +371,68 @@ def test_import_command_parses_engine_option(monkeypatch, tmp_path):
     assert importer.engine == "duckdb"
 
 
+def test_export_command_parses_mssql_python_engine_option(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Exporter", DummyExporter)
+
+    output_dir = tmp_path / "out"
+    result = runner.invoke(
+        cli.app,
+        [
+            "export",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--output-path",
+            str(output_dir),
+            "--trusted-connection",
+            "--engine",
+            "mssql-python",
+        ],
+    )
+
+    assert result.exit_code == 0
+    exporter = DummyExporter.last_instance
+    assert exporter.engine == "mssql-python"
+
+
+def test_import_command_parses_mssql_python_engine_option(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Importer", DummyImporter)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    manifest = "manifest.json"
+    result = runner.invoke(
+        cli.app,
+        [
+            "import",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--input-path",
+            str(input_dir),
+            "--manifest-filename",
+            manifest,
+            "--trusted-connection",
+            "--engine",
+            "mssql-python",
+        ],
+    )
+
+    assert result.exit_code == 0
+    importer = DummyImporter.last_instance
+    assert importer.engine == "mssql-python"
+
+
 def test_import_command_parses_options(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "Importer", DummyImporter)
 
