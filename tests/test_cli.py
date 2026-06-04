@@ -70,6 +70,7 @@ class DummyImporter:
         engine="pyodbc",
         temp_manifest_filename=None,
         delete_files=False,
+        create_cci=True,
     ):
         self.config = config
         self.input_path = Path(input_path)
@@ -80,6 +81,7 @@ class DummyImporter:
         self.transaction_mode = transaction_mode
         self.engine = engine
         self.delete_files = delete_files
+        self.create_cci = create_cci
         DummyImporter.last_instance = self
 
     def perform_work(self):
@@ -575,6 +577,65 @@ def test_import_command_uses_local_temp_tables_by_default(monkeypatch, tmp_path)
     assert result.exit_code == 0
     importer = DummyImporter.last_instance
     assert importer is not None
+
+
+def test_import_command_enables_cci_by_default(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Importer", DummyImporter)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    result = runner.invoke(
+        cli.app,
+        [
+            "import",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--input-path",
+            str(input_dir),
+            "--manifest-filename",
+            "manifest.json",
+            "--trusted-connection",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert DummyImporter.last_instance.create_cci is True
+
+
+def test_import_command_parses_no_cci_option(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Importer", DummyImporter)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    result = runner.invoke(
+        cli.app,
+        [
+            "import",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--input-path",
+            str(input_dir),
+            "--manifest-filename",
+            "manifest.json",
+            "--trusted-connection",
+            "--no-cci",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert DummyImporter.last_instance.create_cci is False
 
 
 def test_import_command_parses_delete_files_option(monkeypatch, tmp_path):

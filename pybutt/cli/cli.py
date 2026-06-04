@@ -423,6 +423,15 @@ def import_data(
         "-x",
         help=("Delete source parquet files and the manifest after import."),
     ),
+    cci: bool = typer.Option(
+        True,
+        "--cci/--no-cci",
+        help=(
+            "Create a clustered columnstore index on the per-worker temp tables "
+            "used during multi-worker import. Use --no-cci to keep the previous "
+            "heap behaviour. Enabled by default."
+        ),
+    ),
 ) -> None:
     """Import Parquet files into a SQL Server table.
 
@@ -457,6 +466,7 @@ def import_data(
         engine=engine.lower(),
         temp_manifest_filename=temp_manifest_filename,
         delete_files=delete_files,
+        create_cci=cci,
     )
     importer.perform_work()
     typer.secho("Import completed successfully.", fg=typer.colors.GREEN)
