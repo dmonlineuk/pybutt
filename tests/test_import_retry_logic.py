@@ -783,3 +783,67 @@ class TestMssqlPythonBulkcopyRetry:
 
         mock_cursor.bulkcopy.assert_called()
         mock_conn.commit.assert_called()
+
+    def test_mssql_create_temp_tables_creates_cci(self, tmp_path, mock_config):
+        """Test _create_temp_tables creates CCI via connection_m."""
+        importer = Importer(
+            config=mock_config,
+            input_path=tmp_path,
+            manifest_filename="manifest.json",
+            batch_size=1000,
+            transaction_mode=TransactionMode.BATCH,
+            engine="mssql-python",
+            worker_count=2,
+            create_cci=True,
+        )
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+
+        with patch.object(importer, "connection_m", return_value=mock_conn):
+            tables = importer._create_temp_tables(2)
+
+        assert len(tables) == 2
+        # SELECT INTO + CREATE CCI per table = 4 execute calls total
+        assert mock_cursor.execute.call_count == 4
+        cci_calls = [
+            call
+            for call in mock_cursor.execute.call_args_list
+            if "CLUSTERED COLUMNSTORE INDEX" in str(call)
+        ]
+        assert len(cci_calls) == 2
+        mock_cursor.close.assert_called_once()
+        mock_conn.close.assert_called_once()
+
+    def test_mssql_create_temp_tables_skips_cci_when_disabled(
+        self, tmp_path, mock_config
+    ):
+        """Test that _create_temp_tables skips CCI when create_cci=False."""
+        importer = Importer(
+            config=mock_config,
+            input_path=tmp_path,
+            manifest_filename="manifest.json",
+            batch_size=1000,
+            transaction_mode=TransactionMode.BATCH,
+            engine="mssql-python",
+            worker_count=2,
+            create_cci=False,
+        )
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+
+        with patch.object(importer, "connection_m", return_value=mock_conn):
+            tables = importer._create_temp_tables(2)
+
+        assert len(tables) == 2
+        # Only SELECT INTO per table = 2 execute calls (no CCI)
+        assert mock_cursor.execute.call_count == 2
+        cci_calls = [
+            call
+            for call in mock_cursor.execute.call_args_list
+            if "CLUSTERED COLUMNSTORE INDEX" in str(call)
+        ]
+        assert len(cci_calls) == 0

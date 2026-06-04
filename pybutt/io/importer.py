@@ -513,22 +513,50 @@ class Importer(SqlServerIOBase):
 
     def _create_temp_tables(self, count: int) -> list[str]:
         temp_tables = []
-        with self.connection_p(autocommit=True) as conn:
-            with conn.cursor() as cur:
-                for i in range(count):
-                    temp_table_name = self._make_temp_table_name(i)
-                    cur.execute(
-                        "SELECT TOP 0 * "
-                        f"INTO {temp_table_name} "
-                        f"FROM {self.full_table_name()}"
-                    )
-                    if self.create_cci:
-                        index_name = self._make_columnstore_index_name(temp_table_name)
+        if self.engine == "mssql-python":
+            conn = self.connection_m(autocommit=True)
+            try:
+                cur = conn.cursor()
+                try:
+                    for i in range(count):
+                        temp_table_name = self._make_temp_table_name(i)
                         cur.execute(
-                            f"CREATE CLUSTERED COLUMNSTORE INDEX {index_name} "
-                            f"ON {temp_table_name}"
+                            "SELECT TOP 0 * "
+                            f"INTO {temp_table_name} "
+                            f"FROM {self.full_table_name()}"
                         )
-                    temp_tables.append(temp_table_name)
+                        if self.create_cci:
+                            index_name = self._make_columnstore_index_name(
+                                temp_table_name
+                            )
+                            cur.execute(
+                                f"CREATE CLUSTERED COLUMNSTORE INDEX {index_name} "
+                                f"ON {temp_table_name}"
+                            )
+                        temp_tables.append(temp_table_name)
+                finally:
+                    cur.close()
+            finally:
+                conn.close()
+        else:
+            with self.connection_p(autocommit=True) as conn:
+                with conn.cursor() as cur:
+                    for i in range(count):
+                        temp_table_name = self._make_temp_table_name(i)
+                        cur.execute(
+                            "SELECT TOP 0 * "
+                            f"INTO {temp_table_name} "
+                            f"FROM {self.full_table_name()}"
+                        )
+                        if self.create_cci:
+                            index_name = self._make_columnstore_index_name(
+                                temp_table_name
+                            )
+                            cur.execute(
+                                f"CREATE CLUSTERED COLUMNSTORE INDEX {index_name} "
+                                f"ON {temp_table_name}"
+                            )
+                        temp_tables.append(temp_table_name)
         return temp_tables
 
     def _assign_files_to_workers(
