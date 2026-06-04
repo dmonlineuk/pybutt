@@ -414,7 +414,7 @@ class Importer(SqlServerIOBase):
                     TransactionMode.ROWGROUP,
                 ):
                     conn.commit()
-                return result.get("rows_copied", len(rows))
+                return result.get("rows_copied", len(rows)) if isinstance(result, dict) else len(rows)
             except Exception as e:
                 safe_msg = self.safe_error_message(e)
                 if attempt < self.config.retries - 1:
