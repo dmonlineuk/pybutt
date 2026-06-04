@@ -253,6 +253,87 @@ def test_export_command_manifest_version_is_2(monkeypatch, tmp_path):
     assert manifest_data["entries"] == ["dbo_MyTable_part_00000.parquet"]
 
 
+def test_export_command_supports_view_like_objects(monkeypatch, tmp_path):
+    import pybutt.io.exporter as exporter_module
+
+    class DummyResult:
+        def __init__(self, value):
+            self.value = value
+
+        def fetchone(self):
+            return (self.value,)
+
+    class DummyConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, query):
+            if "sys.dm_db_partition_stats" in query:
+                return DummyResult(0)
+            if "SELECT COUNT(*)" in query:
+                return DummyResult(42)
+            raise AssertionError(f"Unexpected query: {query}")
+
+    def fake_export_partition(self, n):
+        filename = f"{self.config.schema}_{self.config.table}_part_{n:05d}.parquet"
+        filepath = self.output_path / filename
+        filepath.write_text("dummy")
+        return filename
+
+    class DummyPool:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def map(self, func, args):
+            return [func(arg) for arg in args]
+
+    class DummyContext:
+        def Pool(self, count):
+            return DummyPool()
+
+    monkeypatch.setattr(
+        exporter_module.Exporter, "connection_d", lambda self: DummyConnection()
+    )
+    monkeypatch.setattr(
+        exporter_module.Exporter, "export_partition", fake_export_partition
+    )
+    monkeypatch.setattr(exporter_module, "get_context", lambda _: DummyContext())
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "export",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyView",
+            "--output-path",
+            str(tmp_path),
+            "--trusted-connection",
+            "--file-count",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0
+    manifest_file = tmp_path / "dbo_MyView_manifest.json"
+    assert manifest_file.exists()
+    with open(manifest_file) as f:
+        manifest_data = json.load(f)
+
+    assert manifest_data["entries"] == ["dbo_MyView_part_00000.parquet"]
+
+
 def test_import_command_parses_engine_option(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "Importer", DummyImporter)
 

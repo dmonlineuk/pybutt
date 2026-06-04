@@ -147,6 +147,48 @@ def test_exporter_fetch_size_override(monkeypatch):
     assert exporter.fetch_size == 16_384
 
 
+def test_exporter_partition_meta_falls_back_to_count(monkeypatch):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyView",
+        trusted_connection=True,
+    )
+
+    class DummyResult:
+        def __init__(self, value):
+            self._value = value
+
+        def fetchone(self):
+            return (self._value,)
+
+    class DummyConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, query):
+            if "sys.dm_db_partition_stats" in query:
+                return DummyResult(0)
+            if "SELECT COUNT(*)" in query:
+                return DummyResult(42)
+            raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(Exporter, "connection_d", lambda self: DummyConnection())
+    exporter = Exporter(
+        config=config,
+        output_path=Path("./out"),
+        worker_count=1,
+        file_count=1,
+        rowgroup_size=1_048_576,
+    )
+
+    assert exporter.total_rows == 42
+
+
 def test_exporter_writes_manifest_version_2(monkeypatch, tmp_path):
     config = SqlConfig(
         server="localhost",

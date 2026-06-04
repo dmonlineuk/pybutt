@@ -88,19 +88,33 @@ class Exporter(SqlServerIOBase):
     def partition_meta(self):
         def _work():
             with self.connection_d() as c:
-                query = f"""
+                partition_query = f"""
                     SELECT SUM(row_count)
                     FROM sys.dm_db_partition_stats
                     WHERE object_id = OBJECT_ID('{self.full_table_name()}')
                     AND index_id IN (0,1)
                 """
 
-                return (
+                row_count = (
                     c.execute(
-                        f"FROM odbc_query('{self.dsn}', $$ {query} $$)"
+                        f"FROM odbc_query('{self.dsn}', $$ {partition_query} $$)"
                     ).fetchone()[0]
                     or 0
                 )
+
+                if row_count == 0:
+                    logging.info(
+                        "Partition stats returned zero rows; falling back to COUNT(*)"
+                    )
+                    count_query = f"SELECT COUNT(*) FROM {self.full_table_name()}"
+                    row_count = (
+                        c.execute(
+                            f"FROM odbc_query('{self.dsn}', $$ {count_query} $$)"
+                        ).fetchone()[0]
+                        or 0
+                    )
+
+                return row_count
 
         self.total_rows = self.retry(_work, context="Fetching partition strategy")
 
