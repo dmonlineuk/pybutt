@@ -160,6 +160,8 @@ pybutt export \
   --file-count 8
 ```
 
+Exporting database views is also supported. If partition statistics are unavailable for the target object, PyButt will fall back to `SELECT COUNT(*)` to determine the row count before partitioning.
+
 Export using Windows authentication:
 ```bash
 pybutt export \
