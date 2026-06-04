@@ -220,8 +220,29 @@ pybutt import \
 --batch-size,           -b      Rows per batch insert (default: 1000)
 --engine,               -E      Import engine to use: duckdb or pyodbc (default: pyodbc)
 --transaction-mode,     -tm     Transaction scope: row, batch (default), rowgroup, file
+--cci/--no-cci                  Create a clustered columnstore index on per-worker temp tables (default: enabled)
+--delete-files,         -x      Delete source parquet files and the manifest after import
 --verbose,              -v      Show verbose logging output
 ```
+
+**Columnstore on temporary tables:**
+
+When importing with `--worker-count` of 2 or more, PyButt creates one temporary
+table per worker (`SELECT TOP 0 * INTO ... FROM <source>`) which can then be merged
+into the target afterwards. By default a clustered columnstore index (CCI) is now
+created on each temporary table to reduce the storage footprint of these staging
+tables. Pass `--no-cci` to keep the previous heap behaviour.
+
+Notes:
+- The CCI is only created on the multi-worker path (single-worker imports are
+  unaffected).
+- Space savings come from columnstore compression. The SQL Server tuple mover
+  compresses row groups as data is loaded once they are large enough, so the
+  benefit applies when it matters most (large imports). Small loads may sit in
+  the uncompressed delta store until a row group fills.
+- Clustered columnstore indexes require SQL Server 2014+ (and are available in
+  all editions from SQL Server 2016 SP1). On unsupported instances, or with
+  source columns that columnstore does not support, use `--no-cci`.
 
 **Examples:**
 

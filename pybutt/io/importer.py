@@ -44,6 +44,7 @@ class Importer(SqlServerIOBase):
         engine="pyodbc",
         temp_manifest_filename: str | None = None,
         delete_files: bool = False,
+        create_cci: bool = True,
     ):
         super().__init__(config)
 
@@ -72,6 +73,7 @@ class Importer(SqlServerIOBase):
             )
         self.engine = engine
         self.delete_files = delete_files
+        self.create_cci = create_cci
 
     def load_manifest(self):
         manifest_file = self.input_path / self.manifest_filename
@@ -365,6 +367,10 @@ class Importer(SqlServerIOBase):
         suffix = uuid.uuid4().hex[:8]
         return f"{self.schema}.{self.table}_{worker_index+1:02d}_{suffix}"
 
+    def _make_columnstore_index_name(self, temp_table_name: str) -> str:
+        table_part = temp_table_name.split(".", 1)[-1]
+        return quote_identifier(f"cci_{table_part}")
+
     def _create_temp_tables(self, count: int) -> list[str]:
         temp_tables = []
         with self.connection_p(autocommit=True) as conn:
@@ -376,6 +382,12 @@ class Importer(SqlServerIOBase):
                         f"INTO {temp_table_name} "
                         f"FROM {self.full_table_name()}"
                     )
+                    if self.create_cci:
+                        index_name = self._make_columnstore_index_name(temp_table_name)
+                        cur.execute(
+                            f"CREATE CLUSTERED COLUMNSTORE INDEX {index_name} "
+                            f"ON {temp_table_name}"
+                        )
                     temp_tables.append(temp_table_name)
         return temp_tables
 

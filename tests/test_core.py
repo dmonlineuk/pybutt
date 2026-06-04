@@ -541,6 +541,92 @@ def test_importer_make_temp_table_name_local():
     assert name.count(".") == 1
 
 
+def test_importer_make_columnstore_index_name():
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="users",
+        trusted_connection=True,
+    )
+    importer = Importer(
+        config=config,
+        input_path=Path("./data"),
+        manifest_filename="manifest.json",
+    )
+    index_name = importer._make_columnstore_index_name("dbo.users_01_abcd1234")
+    assert index_name == "[cci_users_01_abcd1234]"
+
+
+def _make_fake_connection():
+    fake_cursor = MagicMock()
+    fake_connection = MagicMock()
+    fake_connection.cursor.return_value.__enter__.return_value = fake_cursor
+    fake_connection.__enter__.return_value = fake_connection
+    return fake_connection, fake_cursor
+
+
+def test_create_temp_tables_creates_columnstore_index_by_default(monkeypatch):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+    importer = Importer(
+        config=config,
+        input_path=Path("./data"),
+        manifest_filename="manifest.json",
+    )
+
+    fake_connection, fake_cursor = _make_fake_connection()
+    monkeypatch.setattr(
+        importer, "connection_p", lambda autocommit=False: fake_connection
+    )
+
+    temp_tables = importer._create_temp_tables(1)
+
+    statements = [call.args[0] for call in fake_cursor.execute.call_args_list]
+    assert any(stmt.startswith("SELECT TOP 0 *") for stmt in statements)
+    cci_statements = [
+        stmt
+        for stmt in statements
+        if stmt.startswith("CREATE CLUSTERED COLUMNSTORE INDEX")
+    ]
+    assert len(cci_statements) == 1
+    assert temp_tables[0] in cci_statements[0]
+    assert "[cci_" in cci_statements[0]
+
+
+def test_create_temp_tables_skips_columnstore_index_when_disabled(monkeypatch):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+    importer = Importer(
+        config=config,
+        input_path=Path("./data"),
+        manifest_filename="manifest.json",
+        create_cci=False,
+    )
+
+    fake_connection, fake_cursor = _make_fake_connection()
+    monkeypatch.setattr(
+        importer, "connection_p", lambda autocommit=False: fake_connection
+    )
+
+    importer._create_temp_tables(2)
+
+    statements = [call.args[0] for call in fake_cursor.execute.call_args_list]
+    assert all(
+        not stmt.startswith("CREATE CLUSTERED COLUMNSTORE INDEX") for stmt in statements
+    )
+
+
 def test_importer_validate_schema_mismatch():
     config = SqlConfig(
         server="localhost",
