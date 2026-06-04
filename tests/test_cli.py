@@ -37,6 +37,7 @@ class DummyExporter:
         fetch_size=None,
         engine="duckdb",
         manifest_filename=None,
+        parameters=None,
     ):
         self.config = config
         self.output_path = Path(output_path)
@@ -48,6 +49,7 @@ class DummyExporter:
         self.fetch_size = fetch_size
         self.engine = engine
         self.manifest_filename = manifest_filename
+        self.parameters = parameters
         DummyExporter.last_instance = self
 
     def perform_work(self):
@@ -439,6 +441,35 @@ def test_export_command_passes_manifest_filename(monkeypatch, tmp_path):
     assert result.exit_code == 0
     exporter = DummyExporter.last_instance
     assert exporter.manifest_filename == "custom_manifest.json"
+
+
+def test_export_command_passes_function_parameters(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Exporter", DummyExporter)
+
+    output_dir = tmp_path / "out"
+    result = runner.invoke(
+        cli.app,
+        [
+            "export",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "export",
+            "--table",
+            "tvf_users",
+            "--output-path",
+            str(output_dir),
+            "--trusted-connection",
+            "--parameters",
+            "12,'fred','1989'",
+        ],
+    )
+
+    assert result.exit_code == 0
+    exporter = DummyExporter.last_instance
+    assert exporter.parameters == "12,'fred','1989'"
 
 
 def test_import_command_uses_default_manifest_filename(monkeypatch, tmp_path):

@@ -147,6 +147,31 @@ def test_exporter_fetch_size_override(monkeypatch):
     assert exporter.fetch_size == 16_384
 
 
+def test_exporter_source_reference_with_parameters(monkeypatch):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="export",
+        table="tvf_users",
+        trusted_connection=True,
+    )
+
+    monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
+    exporter = Exporter(
+        config=config,
+        output_path=Path("./out"),
+        worker_count=1,
+        file_count=1,
+        rowgroup_size=1_048_576,
+        parameters="12,'fred','1989'",
+    )
+
+    assert exporter._source_reference() == "[export].[tvf_users](12,'fred','1989')"
+    exporter.partition_count = 3
+    query = exporter.build_partition_query(1)
+    assert "FROM [export].[tvf_users](12,'fred','1989')" in query
+
+
 def test_exporter_partition_meta_falls_back_to_count(monkeypatch):
     config = SqlConfig(
         server="localhost",
@@ -184,6 +209,50 @@ def test_exporter_partition_meta_falls_back_to_count(monkeypatch):
         worker_count=1,
         file_count=1,
         rowgroup_size=1_048_576,
+    )
+
+    assert exporter.total_rows == 42
+
+
+def test_exporter_partition_meta_uses_parameters_for_count(monkeypatch):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="export",
+        table="tvf_users",
+        trusted_connection=True,
+    )
+
+    class DummyResult:
+        def __init__(self, value):
+            self._value = value
+
+        def fetchone(self):
+            return (self._value,)
+
+    class DummyConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, query):
+            if "sys.dm_db_partition_stats" in query:
+                return DummyResult(0)
+            if "SELECT COUNT(*)" in query:
+                assert "FROM [export].[tvf_users](12,'fred','1989')" in query
+                return DummyResult(42)
+            raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(Exporter, "connection_d", lambda self: DummyConnection())
+    exporter = Exporter(
+        config=config,
+        output_path=Path("./out"),
+        worker_count=1,
+        file_count=1,
+        rowgroup_size=1_048_576,
+        parameters="12,'fred','1989'",
     )
 
     assert exporter.total_rows == 42

@@ -119,6 +119,7 @@ pybutt export \
 --rowgroup-size,        -rs     Number of rows per rowgroup inside each Parquet file (default 1048576)
 --fetch-size,           -fs     Cursor fetch size for pyodbc export (default: min(max(1024, rowgroup_size), 8192))
 --engine,               -E      Export engine to use: duckdb or pyodbc (default: duckdb)
+--parameters,           --parameters  Comma-separated list of parameter values to pass to a table-valued function (e.g. 12,'fred','1989')
 --verbose,              -v      Show verbose logging output
 ```
 
@@ -161,6 +162,18 @@ pybutt export \
 ```
 
 Exporting database views is also supported. If partition statistics are unavailable for the target object, PyButt will fall back to `SELECT COUNT(*)` to determine the row count before partitioning.
+
+Export from a TVF with parameters:
+```bash
+pybutt export \
+  --server sqlserver.example.com \
+  --database MyDatabase \
+  --schema export \
+  --table tvf_users \
+  --parameters "12,'fred','1989'" \
+  --output-path ./exports/tvf_users \
+  --username dbuser
+```
 
 Export using Windows authentication:
 ```bash

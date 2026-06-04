@@ -44,11 +44,13 @@ class Exporter(SqlServerIOBase):
         fetch_size=None,
         engine="duckdb",
         manifest_filename: str | None = None,
+        parameters: str | None = None,
     ):
         super().__init__(config)
 
         self.pk_column = validate_identifier(pk_column) if pk_column else None
         self.columns = [validate_identifier(c) for c in columns] if columns else None
+        self.parameters = parameters
 
         if engine not in ENGINE_CHOICES:
             raise EngineSelectionError(
@@ -106,7 +108,7 @@ class Exporter(SqlServerIOBase):
                     logging.info(
                         "Partition stats returned zero rows; falling back to COUNT(*)"
                     )
-                    count_query = f"SELECT COUNT(*) FROM {self.full_table_name()}"
+                    count_query = f"SELECT COUNT(*) FROM {self._source_reference()}"
                     row_count = (
                         c.execute(
                             f"FROM odbc_query('{self.dsn}', $$ {count_query} $$)"
@@ -150,6 +152,11 @@ class Exporter(SqlServerIOBase):
 
         return [row[0] for row in rows]
 
+    def _source_reference(self) -> str:
+        if self.parameters is None:
+            return self.full_table_name()
+        return f"{self.full_table_name()}({self.parameters})"
+
     def build_partition_query(self, n):
         if self.pk_column:
             start = n * self.chunk_size
@@ -168,7 +175,7 @@ class Exporter(SqlServerIOBase):
                 "ROW_NUMBER() OVER ("
                 f"ORDER BY {quote_identifier(self.pk_column)}"
                 ") AS rn "
-                f"FROM {self.full_table_name()} "
+                f"FROM {self._source_reference()} "
                 ") t "
                 f"WHERE rn > {start} AND rn <= {end}"
             )
@@ -180,7 +187,7 @@ class Exporter(SqlServerIOBase):
             )
             return f"""
                 SELECT {selected_columns}
-                FROM {self.full_table_name()}
+                FROM {self._source_reference()}
                 WHERE ABS(CHECKSUM(*)) % {self.partition_count} = {n}
             """
 
