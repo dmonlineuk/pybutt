@@ -105,19 +105,20 @@ pybutt export \
 --schema,               -S      Table schema (default: dbo)
 --table,                -t      Table name (required)
 --output-path,          -o      Output directory for Parquet files (required)
+--manifest-filename,    -m      Custom manifest filename to write (default: <schema>_<table>_manifest.json)
 --username,             -u      SQL Server username
 --password,             -p      SQL Server password (prompted if not provided)
 --trusted-connection,   -T      Use Windows integrated authentication
 --driver,               -D      ODBC driver name (default: ODBC Driver 18 for SQL Server)
---trust-cert,           -tc     Trust the SQL Server TLS certificate
---encrypt/--no-encrypt, -e/-ne  Enable/disable encrypted transport (default: enabled)
---retries,              -rc     Number of retry attempts for transient errors (default: 3)
+--trust-cert,           -c      Trust the SQL Server TLS certificate
+--encrypt/--no-encrypt, -e/-n   Enable/disable encrypted transport (default: enabled)
+--retries,              -r      Number of retry attempts for transient errors (default: 3)
 --pk-column,            -P      Primary key column for deterministic partitioning
---columns,              -c      Comma-separated list of columns to export (all by default)
---worker-count,         -wc     Number of worker processes (default: 1)
---file-count,           -fc     Number of output Parquet files (default: 1)
---rowgroup-size,        -rs     Number of rows per rowgroup inside each Parquet file (default 1048576)
---fetch-size,           -fs     Cursor fetch size for pyodbc export (default: min(max(1024, rowgroup_size), 8192))
+--columns,              -C      Comma-separated list of columns to export (all by default)
+--worker-count,         -w      Number of worker processes (default: 1)
+--file-count,           -f      Number of output Parquet files (default: 1)
+--rowgroup-size,        -R      Number of rows per rowgroup inside each Parquet file (default 1048576)
+--fetch-size,           -F      Cursor fetch size for pyodbc export (default: min(max(1024, rowgroup_size), 8192))
 --engine,               -E      Export engine to use: duckdb or pyodbc (default: duckdb)
 --parameters,           --parameters  Comma-separated list of parameter values to pass to a table-valued function (e.g. 12,'fred','1989')
 --verbose,              -v      Show verbose logging output
@@ -203,26 +204,27 @@ pybutt import \
 **Import Options:**
 
 ```
---server,               -s      SQL Server hostname or instance (required)
---database,             -d      Target database (required)
---schema,               -S      Table schema (default: dbo)
---table,                -t      Table name (required)
---input-path,           -i      Directory containing Parquet files (required)
---manifest-filename,    -m      Manifest file name (required)
---username,             -u      SQL Server username
---password,             -p      SQL Server password (prompted if not provided)
---trusted-connection,   -T      Use Windows integrated authentication
---driver,               -D      ODBC driver name (default: ODBC Driver 18 for SQL Server)
---trust-cert,           -tc     Trust the SQL Server TLS certificate
---encrypt/--no-encrypt, -e/-ne  Enable/disable encrypted transport (default: enabled)
---retries,              -rc     Number of retry attempts for transient errors (default: 3)
---worker-count,         -wc     Number of parallel import threads (default: 1)
---batch-size,           -b      Rows per batch insert (default: 1000)
---engine,               -E      Import engine to use: duckdb or pyodbc (default: pyodbc)
---transaction-mode,     -tm     Transaction scope: row, batch (default), rowgroup, file
---cci/--no-cci                  Create a clustered columnstore index on per-worker temp tables (default: enabled)
---delete-files,         -x      Delete source parquet files and the manifest after import
---verbose,              -v      Show verbose logging output
+--server,                     -s      SQL Server hostname or instance (required)
+--database,                   -d      Target database (required)
+--schema,                     -S      Table schema (default: dbo)
+--table,                      -t      Table name (required)
+--input-path,                 -i      Directory containing Parquet files (required)
+--manifest-filename,          -m      Manifest file name (required)
+--output-manifest-filename,   -o      Override temporary worker manifest filename during multi-worker import
+--username,                   -u      SQL Server username
+--password,                   -p      SQL Server password (prompted if not provided)
+--trusted-connection,         -T      Use Windows integrated authentication
+--driver,                     -D      ODBC driver name (default: ODBC Driver 18 for SQL Server)
+--trust-cert,                 -c      Trust the SQL Server TLS certificate
+--encrypt/--no-encrypt,       -e/-n   Enable/disable encrypted transport (default: enabled)
+--retries,                    -r      Number of retry attempts for transient errors (default: 3)
+--worker-count,               -w      Number of parallel import threads (default: 1)
+--batch-size,                 -b      Rows per batch insert (default: 1000)
+--engine,                     -E      Import engine to use: duckdb or pyodbc (default: pyodbc)
+--transaction-mode,           -M      Transaction scope: row, batch (default), rowgroup, file
+--cci/--no-cci                        Create a clustered columnstore index on per-worker temp tables (default: enabled)
+--delete-files,               -x      Delete source parquet files and the manifest after import
+--verbose,                    -v      Show verbose logging output
 ```
 
 **Columnstore on temporary tables:**
@@ -330,6 +332,85 @@ pybutt import \
   --manifest-filename data_manifest.json \
   --username dbuser \
   --transaction-mode rowgroup
+```
+
+#### Merge Command
+
+Merge objects listed in a manifest file. This command supports two types of merges depending on the manifest type:
+- **Files manifest (`type: "files"`)**: Concatenates multiple Parquet files into a single output Parquet file.
+- **Tables manifest (`type: "tables"`)**: Merges multiple temporary/worker SQL tables into a single target table on your SQL Server.
+
+```bash
+# File merge example:
+pybutt merge \
+  --manifest ./exports/customers/dbo_Customers_manifest.json \
+  --output-file ./exports/customers/merged.parquet
+
+# Table merge example:
+pybutt merge \
+  --manifest ./exports/customers/dbo_Customers_temp_manifest.json \
+  --server YOUR_SERVER \
+  --database YOUR_DB \
+  --schema dbo \
+  --table Customers \
+  --username your_user
+```
+
+**Merge Options:**
+
+```
+--manifest,             -m    Path to the manifest file (required)
+--output-file,          -o    Output Parquet file path (required for file merges)
+--rowgroup-size,        -R    Rowgroup size for output Parquet file (default: 1048576)
+--delete-files,         -x    Delete source files/manifests after successful merge
+--server,               -s    SQL Server hostname or instance (required for table merges)
+--database,             -d    Target database (required for table merges)
+--schema,               -S    Target schema (required for table merges)
+--table,                -t    Target table name (required for table merges)
+--username,             -u    SQL Server username (for table merges)
+--password,             -p    SQL Server password (for table merges)
+--trusted-connection,   -T    Use Windows integrated authentication
+--driver,               -D    ODBC driver name (default: ODBC Driver 18 for SQL Server)
+--trust-cert,           -c    Trust the SQL Server TLS certificate
+--encrypt/--no-encrypt, -e/-n Enable/disable encrypted transport (default: enabled)
+--retries,              -r    Number of retry attempts for transient SQL errors (default: 3)
+--verbose,              -v    Show verbose logging output
+```
+
+#### Inspect Command
+
+Inspect details of the Parquet files listed in a manifest (including row counts, row group counts, size, and columns):
+
+```bash
+pybutt inspect ./exports/customers/dbo_Customers_manifest.json
+```
+
+**Inspect Options:**
+
+```
+manifest                      Path to manifest.json file (positional, required)
+--verbose,            -v      Show full column definitions, schema, and detailed metadata
+```
+
+#### Rewrite Command
+
+Rewrite existing Parquet files listed in a manifest using a new, updated row-group size:
+
+```bash
+pybutt rewrite \
+  ./exports/customers/dbo_Customers_manifest.json \
+  --output-path ./exports/customers_rewritten \
+  --rowgroup-size 500000
+```
+
+**Rewrite Options:**
+
+```
+manifest                      Path to manifest.json file (positional, required)
+--output-path,        -o      Output directory to write the rewritten Parquet files
+--rowgroup-size,      -R      New row-group size to apply (required)
+--new-manifest,       -m      Optional customized name for rewritten manifest JSON file
+--delete-files,       -x      Delete original parquet files and manifest after rewriting
 ```
 
 ### Password Input
