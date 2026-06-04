@@ -228,8 +228,8 @@ pybutt import \
 **Columnstore on temporary tables:**
 
 When importing with `--worker-count` of 2 or more, PyButt creates one temporary
-table per worker (`SELECT TOP 0 * INTO ... FROM <source>`) and merges them into
-the target afterwards. By default a clustered columnstore index (CCI) is now
+table per worker (`SELECT TOP 0 * INTO ... FROM <source>`) which can then be merged
+into the target afterwards. By default a clustered columnstore index (CCI) is now
 created on each temporary table to reduce the storage footprint of these staging
 tables. Pass `--no-cci` to keep the previous heap behaviour.
 
