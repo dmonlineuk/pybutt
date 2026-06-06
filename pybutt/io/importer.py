@@ -150,6 +150,10 @@ class Importer(SqlServerIOBase):
                         return self._import_file_with_duckdb(
                             filepath, filename, start, target_table=target_table
                         )
+                    elif self.engine == "mssql-python":
+                        return self._import_file_with_mssql(
+                            filepath, filename, start, target_table=target_table
+                        )
                     return self._import_file_impl(
                         filepath, filename, start, target_table=target_table
                     )
@@ -159,6 +163,10 @@ class Importer(SqlServerIOBase):
                 # For BATCH, ROWGROUP, and ROW modes, retries happen at granular level
                 if self.engine == "duckdb":
                     self._import_file_with_duckdb(
+                        filepath, filename, start, target_table=target_table
+                    )
+                elif self.engine == "mssql-python":
+                    self._import_file_with_mssql(
                         filepath, filename, start, target_table=target_table
                     )
                 else:
@@ -294,6 +302,138 @@ class Importer(SqlServerIOBase):
                     f"{time.time() - start:.2f}s"
                 )
 
+    def _import_file_with_mssql(
+        self, filepath, filename, start, target_table: str | None = None
+    ):
+        """Import a parquet file using mssql-python's bulkcopy API."""
+        parquet_file = pq.ParquetFile(filepath)
+        columns = parquet_file.schema.names
+        target_table_name = target_table or self.full_table_name()
+
+        conn = self.connection_m(
+            autocommit=(self.transaction_mode == TransactionMode.ROW)
+        )
+        try:
+            cur = conn.cursor()
+            try:
+                table_columns = [
+                    col[0]
+                    for col in cur.execute(
+                        f"SELECT TOP 0 * FROM {target_table_name}"
+                    ).description
+                ]
+                self.validate_schema(columns, table_columns, filename)
+            finally:
+                cur.close()
+
+            total_rows = 0
+
+            if self.transaction_mode == TransactionMode.ROWGROUP:
+                for rg_idx in range(parquet_file.num_row_groups):
+                    table = parquet_file.read_row_group(rg_idx)
+                    rows_in_rg = self._mssql_bulkcopy_with_retry(
+                        conn,
+                        table,
+                        columns,
+                        target_table_name,
+                        filename,
+                        context=f"row group {rg_idx + 1}/{parquet_file.num_row_groups}",
+                    )
+                    total_rows += rows_in_rg
+                    logging.info(
+                        f"{filename}: processed row group {rg_idx + 1}/"
+                        f"{parquet_file.num_row_groups}"
+                    )
+            else:
+                for rg_idx in range(parquet_file.num_row_groups):
+                    table = parquet_file.read_row_group(rg_idx)
+                    for batch in table.to_batches(max_chunksize=self.batch_size):
+                        rows = self._rows_from_batch(batch)
+                        if self.transaction_mode == TransactionMode.BATCH:
+                            rows_in_batch = self._mssql_bulkcopy_with_retry(
+                                conn,
+                                rows,
+                                columns,
+                                target_table_name,
+                                filename,
+                                context=f"batch in {filename}",
+                                is_rows=True,
+                            )
+                            total_rows += rows_in_batch
+                        else:
+                            cursor = conn.cursor()
+                            try:
+                                cursor.bulkcopy(
+                                    target_table_name,
+                                    rows,
+                                    column_mappings=columns,
+                                )
+                            finally:
+                                cursor.close()
+                            total_rows += len(rows)
+
+            if self.transaction_mode == TransactionMode.FILE:
+                conn.commit()
+
+            logging.info(
+                f"Completed file={filename}, total rows: {total_rows}, in "
+                f"{time.time() - start:.2f}s"
+            )
+        finally:
+            conn.close()
+
+    def _mssql_bulkcopy_with_retry(
+        self,
+        conn,
+        data,
+        columns,
+        target_table_name,
+        filename,
+        context="operation",
+        is_rows=False,
+    ):
+        """Execute bulkcopy with retry logic."""
+        if not is_rows:
+            rows = self._rows_from_arrow_table(data)
+        else:
+            rows = data
+
+        for attempt in range(self.config.retries):
+            try:
+                cursor = conn.cursor()
+                try:
+                    result = cursor.bulkcopy(
+                        target_table_name,
+                        rows,
+                        column_mappings=columns,
+                    )
+                finally:
+                    cursor.close()
+                if self.transaction_mode in (
+                    TransactionMode.BATCH,
+                    TransactionMode.ROWGROUP,
+                ):
+                    conn.commit()
+                return result.get("rows_copied", len(rows)) if isinstance(result, dict) else len(rows)
+            except Exception as e:
+                safe_msg = self.safe_error_message(e)
+                if attempt < self.config.retries - 1:
+                    logging.warning(
+                        f"{context} retry {attempt + 1}/{self.config.retries} "
+                        f"failed in {filename}: {safe_msg}"
+                    )
+                    conn.rollback()
+                    time.sleep(2**attempt)
+                else:
+                    raise BatchImportError(
+                        f"Bulk copy failed after {self.config.retries} retries: "
+                        f"{safe_msg}"
+                    ) from None
+
+    def _rows_from_arrow_table(self, table):
+        """Convert a PyArrow table to a list of tuples for bulkcopy."""
+        return list(zip(*[col.to_pylist() for col in table.columns], strict=True))
+
     def _import_batch_with_retry(self, c, cur, rows_or_batch, insert_sql, filename):
         """Import a single batch with retry logic for BATCH mode."""
         rows = (
@@ -373,22 +513,50 @@ class Importer(SqlServerIOBase):
 
     def _create_temp_tables(self, count: int) -> list[str]:
         temp_tables = []
-        with self.connection_p(autocommit=True) as conn:
-            with conn.cursor() as cur:
-                for i in range(count):
-                    temp_table_name = self._make_temp_table_name(i)
-                    cur.execute(
-                        "SELECT TOP 0 * "
-                        f"INTO {temp_table_name} "
-                        f"FROM {self.full_table_name()}"
-                    )
-                    if self.create_cci:
-                        index_name = self._make_columnstore_index_name(temp_table_name)
+        if self.engine == "mssql-python":
+            conn = self.connection_m(autocommit=True)
+            try:
+                cur = conn.cursor()
+                try:
+                    for i in range(count):
+                        temp_table_name = self._make_temp_table_name(i)
                         cur.execute(
-                            f"CREATE CLUSTERED COLUMNSTORE INDEX {index_name} "
-                            f"ON {temp_table_name}"
+                            "SELECT TOP 0 * "
+                            f"INTO {temp_table_name} "
+                            f"FROM {self.full_table_name()}"
                         )
-                    temp_tables.append(temp_table_name)
+                        if self.create_cci:
+                            index_name = self._make_columnstore_index_name(
+                                temp_table_name
+                            )
+                            cur.execute(
+                                f"CREATE CLUSTERED COLUMNSTORE INDEX {index_name} "
+                                f"ON {temp_table_name}"
+                            )
+                        temp_tables.append(temp_table_name)
+                finally:
+                    cur.close()
+            finally:
+                conn.close()
+        else:
+            with self.connection_p(autocommit=True) as conn:
+                with conn.cursor() as cur:
+                    for i in range(count):
+                        temp_table_name = self._make_temp_table_name(i)
+                        cur.execute(
+                            "SELECT TOP 0 * "
+                            f"INTO {temp_table_name} "
+                            f"FROM {self.full_table_name()}"
+                        )
+                        if self.create_cci:
+                            index_name = self._make_columnstore_index_name(
+                                temp_table_name
+                            )
+                            cur.execute(
+                                f"CREATE CLUSTERED COLUMNSTORE INDEX {index_name} "
+                                f"ON {temp_table_name}"
+                            )
+                        temp_tables.append(temp_table_name)
         return temp_tables
 
     def _assign_files_to_workers(

@@ -4,7 +4,7 @@ from enum import StrEnum
 
 from pybutt.exceptions import InvalidIdentifierError
 
-ENGINE_CHOICES = frozenset({"duckdb", "pyodbc"})
+ENGINE_CHOICES = frozenset({"duckdb", "pyodbc", "mssql-python"})
 
 
 class TransactionMode(StrEnum):

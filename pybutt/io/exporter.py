@@ -385,6 +385,95 @@ class Exporter(SqlServerIOBase):
                         f"Failed exporting {filename}: {self.safe_error_message(e)}"
                     ) from e
 
+    def _export_partition_with_mssql(self, query, filepath, filename):
+        conn = self.connection_m()
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute(query)
+
+                if cur.description is None:
+                    raise DataExportError(
+                        f"Failed exporting {filename}: query returned no column "
+                        "metadata"
+                    )
+
+                columns = [desc[0] for desc in cur.description]
+                fetch_size = self.fetch_size
+
+                first_rows = cur.fetchmany(fetch_size)
+                if not first_rows:
+                    empty_schema = pa.schema(
+                        [pa.field(c, pa.string()) for c in columns]
+                    )
+                    with pq.ParquetWriter(
+                        str(filepath.as_posix()), empty_schema, compression="snappy"
+                    ) as writer:
+                        writer.write_table(
+                            pa.Table.from_pydict(
+                                {c: [] for c in columns}, schema=empty_schema
+                            )
+                        )
+                    return
+
+                batch_dicts = [
+                    dict(zip(columns, row, strict=True)) for row in first_rows
+                ]
+                target_schema = pa.Table.from_pylist(batch_dicts).schema
+
+                def _rows_to_table(rows_to_write):
+                    batch = [
+                        dict(zip(columns, row, strict=True)) for row in rows_to_write
+                    ]
+                    tbl = pa.Table.from_pylist(batch)
+                    if tbl.schema != target_schema:
+                        arrays = []
+                        for field in target_schema:
+                            name = field.name
+                            col_type = field.type
+                            vals = [r.get(name) for r in batch]
+                            arrays.append(pa.array(vals, type=col_type))
+                        tbl = pa.Table.from_arrays(
+                            arrays, names=[f.name for f in target_schema]
+                        )
+                    return tbl
+
+                with pq.ParquetWriter(
+                    str(filepath.as_posix()), target_schema, compression="snappy"
+                ) as writer:
+                    buffered_rows = list(first_rows)
+
+                    while True:
+                        if len(buffered_rows) >= self.rowgroup_size:
+                            rows_to_write = buffered_rows[: self.rowgroup_size]
+                            writer.write_table(
+                                _rows_to_table(rows_to_write),
+                                row_group_size=self.rowgroup_size,
+                            )
+                            buffered_rows = buffered_rows[self.rowgroup_size :]
+                            continue
+
+                        rows = cur.fetchmany(fetch_size)
+                        if not rows:
+                            break
+                        buffered_rows.extend(rows)
+
+                    if buffered_rows:
+                        writer.write_table(
+                            _rows_to_table(buffered_rows),
+                            row_group_size=self.rowgroup_size,
+                        )
+            except DataExportError:
+                raise
+            except Exception as e:
+                raise DataExportError(
+                    f"Failed exporting {filename}: {self.safe_error_message(e)}"
+                ) from e
+            finally:
+                cur.close()
+        finally:
+            conn.close()
+
     def export_partition(self, n):
         thread_id = threading.get_ident()
         start = time.time()
@@ -405,6 +494,8 @@ class Exporter(SqlServerIOBase):
         def _work():
             if self.engine == "duckdb":
                 self._export_partition_with_duckdb(query, filepath, filename)
+            elif self.engine == "mssql-python":
+                self._export_partition_with_mssql(query, filepath, filename)
             else:
                 self._export_partition_with_pyodbc(query, filepath, filename)
 

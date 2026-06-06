@@ -244,7 +244,7 @@ def export(
         "duckdb",
         "--engine",
         "-E",
-        help="Export engine to use: duckdb or pyodbc.",
+        help="Export engine to use: duckdb, pyodbc, or mssql-python.",
         case_sensitive=False,
     ),
     verbose: bool = typer.Option(  # noqa: B008
@@ -405,7 +405,7 @@ def import_data(
         "pyodbc",
         "--engine",
         "-E",
-        help="Import engine to use: duckdb or pyodbc.",
+        help="Import engine to use: duckdb, pyodbc, or mssql-python.",
         case_sensitive=False,
     ),
     transaction_mode: TransactionMode = typer.Option(  # noqa: B008

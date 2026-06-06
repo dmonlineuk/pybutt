@@ -807,3 +807,112 @@ def test_importer_multi_worker_defaults_to_local_temp_tables(monkeypatch, tmp_pa
     assert created_tables
     assert all(not name.startswith("##") for name in created_tables)
     assert all("." in name for name in created_tables)
+
+
+def test_exporter_accepts_mssql_python_engine(monkeypatch):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+
+    monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
+    exporter = Exporter(
+        config=config,
+        output_path=Path("./out"),
+        worker_count=1,
+        file_count=1,
+        engine="mssql-python",
+    )
+
+    assert exporter.engine == "mssql-python"
+
+
+def test_importer_accepts_mssql_python_engine(tmp_path):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+
+    importer = Importer(
+        config=config,
+        input_path=tmp_path,
+        manifest_filename="manifest.json",
+        engine="mssql-python",
+    )
+
+    assert importer.engine == "mssql-python"
+
+
+def test_connection_m_builds_correct_connection_string(monkeypatch):
+    config = SqlConfig(
+        server="myserver.example.com",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        username="user",
+        password="secret",
+        trusted_connection=False,
+        trust_cert=True,
+        encrypt=True,
+    )
+
+    captured_conn_str = []
+
+    def mock_connect(conn_str):
+        captured_conn_str.append(conn_str)
+        mock_conn = MagicMock()
+        return mock_conn
+
+    import mssql_python
+
+    monkeypatch.setattr(mssql_python, "connect", mock_connect)
+
+    base = SqlServerIOBase(config)
+    base.connection_m(autocommit=False)
+
+    assert len(captured_conn_str) == 1
+    conn_str = captured_conn_str[0]
+    assert "Server=myserver.example.com" in conn_str
+    assert "Database=TestDb" in conn_str
+    assert "UID=user" in conn_str
+    assert "PWD=secret" in conn_str
+    assert "TrustServerCertificate=Yes" in conn_str
+    assert "Encrypt=Yes" in conn_str
+
+
+def test_connection_m_trusted_connection(monkeypatch):
+    config = SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+        trust_cert=False,
+        encrypt=False,
+    )
+
+    captured_conn_str = []
+
+    def mock_connect(conn_str):
+        captured_conn_str.append(conn_str)
+        mock_conn = MagicMock()
+        return mock_conn
+
+    import mssql_python
+
+    monkeypatch.setattr(mssql_python, "connect", mock_connect)
+
+    base = SqlServerIOBase(config)
+    base.connection_m(autocommit=True)
+
+    assert len(captured_conn_str) == 1
+    conn_str = captured_conn_str[0]
+    assert "Trusted_Connection=Yes" in conn_str
+    assert "TrustServerCertificate=No" in conn_str
+    assert "Encrypt=Yes" not in conn_str

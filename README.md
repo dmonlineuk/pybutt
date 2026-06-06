@@ -119,7 +119,7 @@ pybutt export \
 --file-count,           -f      Number of output Parquet files (default: 1)
 --rowgroup-size,        -R      Number of rows per rowgroup inside each Parquet file (default: 1048576)
 --fetch-size,           -F      Cursor fetch size for pyodbc export (default: min(max(1024, rowgroup_size), 8192))
---engine,               -E      Export engine to use: duckdb or pyodbc (default: duckdb)
+--engine,               -E      Export engine to use: duckdb, pyodbc, or mssql-python (default: duckdb)
 --parameters                    Comma-separated list of parameter values to pass to a table-valued function (e.g. 12,'fred','1989')
 --verbose,              -v      Show verbose logging output
 ```
@@ -147,6 +147,17 @@ pybutt export \
   --output-path ./exports/customers \
   --username dbuser \
   --engine pyodbc
+```
+
+Export using the mssql-python engine:
+```bash
+pybutt export \
+  --server sqlserver.example.com \
+  --database MyDatabase \
+  --table Customers \
+  --output-path ./exports/customers \
+  --username dbuser \
+  --engine mssql-python
 ```
 
 Export specific columns using primary key partitioning:
@@ -220,7 +231,7 @@ pybutt import \
 --retries,                    -r      Number of retry attempts for transient errors (default: 3)
 --worker-count,               -w      Number of parallel import threads (default: 1)
 --batch-size,                 -b      Rows per batch insert (default: 1000)
---engine,                     -E      Import engine to use: duckdb or pyodbc (default: pyodbc)
+--engine,                     -E      Import engine to use: duckdb, pyodbc, or mssql-python (default: pyodbc)
 --transaction-mode,           -M      Transaction scope: row, batch (default), rowgroup, file
 --cci/--no-cci                        Create a clustered columnstore index on per-worker temp tables (default: enabled)
 --delete-files,               -x      Delete source parquet files and the manifest after import
@@ -269,6 +280,18 @@ pybutt import \
   --manifest-filename customers_manifest.json \
   --username dbuser \
   --engine duckdb
+```
+
+Import using the mssql-python engine (native bulk insert for faster imports):
+```bash
+pybutt import \
+  --server sqlserver.example.com \
+  --database MyDatabase \
+  --table Customers \
+  --input-path ./exports/customers \
+  --manifest-filename customers_manifest.json \
+  --username dbuser \
+  --engine mssql-python
 ```
 
 High-throughput import with larger batches (BATCH mode):
@@ -654,6 +677,7 @@ manifest:
 
 - **Export**: Increase `--worker-count` and `--file-count` for large tables (use values matching your CPU core count)
 - **Import**: Use `--worker-count` up to your CPU core count and adjust `--batch-size` (higher values = fewer database round trips)
+- **mssql-python engine**: Use `--engine mssql-python` for imports to leverage native bulk insert (`bulkcopy`) which is significantly faster than parameterized `INSERT` statements used by pyodbc
 - **Primary Key Partitioning**: Use `--pk-column` for deterministic partitioning when re-importing the same data
 - **Encryption**: Use `--no-encrypt` only in secure networks to reduce overhead
 

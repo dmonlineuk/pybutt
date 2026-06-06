@@ -3,6 +3,7 @@ import re
 import time
 
 import duckdb as d
+import mssql_python
 import pyodbc
 
 from pybutt.exceptions import ConfigurationError, RetryExceededError
@@ -59,6 +60,32 @@ class SqlServerIOBase:
     def connection_p(self, autocommit=False):
         conn = pyodbc.connect(self.dsn)
         conn.autocommit = autocommit
+        return conn
+
+    def connection_m(self, autocommit=False):
+        cfg = self.config
+
+        parts = [
+            f"Server={cfg.server}",
+            f"Database={cfg.database}",
+        ]
+
+        if cfg.trusted_connection:
+            parts.append("Trusted_Connection=Yes")
+        else:
+            if cfg.username:
+                parts.append(f"UID={cfg.username}")
+            if cfg.password:
+                parts.append(f"PWD={cfg.password}")
+
+        parts.append(f"TrustServerCertificate={'Yes' if cfg.trust_cert else 'No'}")
+
+        if cfg.encrypt:
+            parts.append("Encrypt=Yes")
+
+        conn_str = ";".join(parts) + ";"
+        conn = mssql_python.connect(conn_str)
+        conn.setautocommit(autocommit)
         return conn
 
     def full_table_name(self):
