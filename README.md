@@ -12,6 +12,13 @@
 - **Manifest-Based Import**: Track exported files with automatic manifests
 - **Performance Optimized**: Multi-process export and multi-threaded import for maximum throughput
 
+## Documentation
+
+In-depth guides on the data pipeline, memory behaviour, tuning knobs, engine
+differences, and defaults live in [`docs/`](docs/README.md). Start with
+[concepts](docs/concepts.md), then [tuning](docs/tuning.md),
+[engines](docs/engines.md), and [defaults](docs/defaults.md).
+
 ## Prerequisites
 
 Before installing PyButt, ensure your system has the required ODBC components:
