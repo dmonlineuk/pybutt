@@ -65,7 +65,7 @@ class DummyImporter:
         input_path,
         manifest_filename,
         worker_count=1,
-        batch_size=1000,
+        batch_size=None,
         transaction_mode=None,
         engine="pyodbc",
         temp_manifest_filename=None,
@@ -476,6 +476,36 @@ def test_import_command_parses_options(monkeypatch, tmp_path):
     assert importer.worker_count == 4
     assert importer.batch_size == 2500
     assert importer.engine == "pyodbc"
+
+
+def test_import_command_batch_size_defaults_to_sentinel(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Importer", DummyImporter)
+
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    result = runner.invoke(
+        cli.app,
+        [
+            "import",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--input-path",
+            str(input_dir),
+            "--manifest-filename",
+            "manifest.json",
+            "--trusted-connection",
+        ],
+    )
+
+    assert result.exit_code == 0
+    # CLI forwards None when unset so the Importer applies the engine-aware default.
+    assert DummyImporter.last_instance.batch_size is None
 
 
 def test_export_command_passes_manifest_filename(monkeypatch, tmp_path):

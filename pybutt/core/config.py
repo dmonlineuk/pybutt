@@ -6,6 +6,27 @@ from pybutt.exceptions import InvalidIdentifierError
 
 ENGINE_CHOICES = frozenset({"duckdb", "pyodbc", "mssql-python"})
 
+# Generic (engine-independent) fallback for the import batch size.
+DEFAULT_IMPORT_BATCH_SIZE = 1_000
+
+# Per-engine default overrides, keyed by tunable name then engine. Only values
+# that diverge from the generic fallback are listed; everything else falls back.
+# See docs/defaults.md for the rationale behind each entry.
+ENGINE_DEFAULTS: dict[str, dict[str, int]] = {
+    # mssql-python import uses bulkcopy, where each batch closes a columnstore
+    # rowgroup, so default to a full rowgroup instead of the generic batch size.
+    "batch_size": {"mssql-python": 1_048_576},
+}
+
+
+def resolve_engine_default(
+    tunable: str, engine: str, value: int | None, fallback: int
+) -> int:
+    """Resolve a tunable: explicit value wins, else engine default, else fallback."""
+    if value is not None:
+        return value
+    return ENGINE_DEFAULTS.get(tunable, {}).get(engine, fallback)
+
 
 class TransactionMode(StrEnum):
     """Control how transactions are handled during import."""

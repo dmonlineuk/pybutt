@@ -10,10 +10,12 @@ import pyarrow.parquet as pq
 
 from pybutt.core.base import SqlServerIOBase
 from pybutt.core.config import (
+    DEFAULT_IMPORT_BATCH_SIZE,
     ENGINE_CHOICES,
     SqlConfig,
     TransactionMode,
     quote_identifier,
+    resolve_engine_default,
 )
 from pybutt.exceptions import (
     BatchImportError,
@@ -39,7 +41,7 @@ class Importer(SqlServerIOBase):
         input_path,
         manifest_filename: str | None,
         worker_count=1,
-        batch_size=1_000,
+        batch_size: int | None = None,
         transaction_mode: TransactionMode = TransactionMode.BATCH,
         engine="pyodbc",
         temp_manifest_filename: str | None = None,
@@ -61,7 +63,6 @@ class Importer(SqlServerIOBase):
         )
 
         self.worker_count = worker_count
-        self.batch_size = batch_size
         self.transaction_mode = (
             TransactionMode(transaction_mode)
             if isinstance(transaction_mode, str)
@@ -72,6 +73,9 @@ class Importer(SqlServerIOBase):
                 f"engine must be one of {sorted(ENGINE_CHOICES)}"
             )
         self.engine = engine
+        self.batch_size = resolve_engine_default(
+            "batch_size", self.engine, batch_size, DEFAULT_IMPORT_BATCH_SIZE
+        )
         self.delete_files = delete_files
         self.create_cci = create_cci
 
@@ -414,7 +418,11 @@ class Importer(SqlServerIOBase):
                     TransactionMode.ROWGROUP,
                 ):
                     conn.commit()
-                return result.get("rows_copied", len(rows)) if isinstance(result, dict) else len(rows)
+                return (
+                    result.get("rows_copied", len(rows))
+                    if isinstance(result, dict)
+                    else len(rows)
+                )
             except Exception as e:
                 safe_msg = self.safe_error_message(e)
                 if attempt < self.config.retries - 1:

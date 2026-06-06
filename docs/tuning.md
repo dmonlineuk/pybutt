@@ -43,11 +43,12 @@ knobs interact. Read [concepts](concepts.md) first for the underlying model.
 ### `--batch-size` (`-b`)
 - **What it is:** the number of rows per `executemany` (pyodbc/duckdb) or
   `bulkcopy` (mssql-python) call.
-- **Default:** `1000`.
+- **Default:** `1000` for `pyodbc`/`duckdb`; `1048576` for `mssql-python`
+  (engine-aware — see [defaults](defaults.md)). An explicit value always wins.
 - **Also the commit unit** in `--transaction-mode batch`.
 - **For mssql-python it sizes columnstore rowgroups** in `batch` mode: each batch
-  closes a rowgroup, so small values create many tiny rowgroups. See
-  [defaults](defaults.md).
+  closes a rowgroup, so small values create many tiny rowgroups — which is why
+  its default is a full rowgroup. See [defaults](defaults.md).
 - **What it does NOT do:** it does not bound import memory — a full Parquet
   rowgroup (or the whole file, for duckdb) is already in memory before batching.
 

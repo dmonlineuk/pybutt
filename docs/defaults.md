@@ -20,14 +20,14 @@ default is added or changed.
 | Option | Default | Notes |
 |---|---|---|
 | `--engine` | `pyodbc` | Broad compatibility; parameterised `executemany`. |
-| `--batch-size` | `1000` | Rows per insert / commit unit in `batch` mode. |
+| `--batch-size` | `1000`, or `1048576` for `mssql-python` | Engine-aware (see below). Rows per insert / commit unit in `batch` mode. |
 | `--transaction-mode` | `batch` | Balanced safety/perf; per-batch retries. |
 | `--worker-count` | `1` | |
 | `--cci` | enabled | CCI on per-worker staging tables (multi-worker only). |
 | `--retries` | `3` | |
 
-These defaults are **engine-independent today**: the same value is used no matter
-which `--engine` is selected.
+Most defaults are engine-independent; `--batch-size` is **engine-aware** (it
+differs for `mssql-python`). An explicit value always overrides the default.
 
 ## Why engine-specific defaults are being considered
 
@@ -48,37 +48,46 @@ So the *correct* default for `--batch-size` depends on the chosen engine. Rather
 than forcing every user to know this, PyButt can apply an engine-aware default
 when the user has not explicitly set the option.
 
-## Proposed mechanism (engine-aware defaults)
+## Mechanism (engine-aware defaults)
 
-> Status: design agreed in principle; concrete values still being finalised.
+> Status: implemented. See `pybutt/core/config.py`.
 
 - Options that benefit from engine-specific defaults use a sentinel (`None`)
   default, meaning "user did not specify" — the same pattern `--fetch-size`
   already uses.
-- A central registry maps `(option, engine) -> default value`.
-- Resolution happens in the `Importer`/`Exporter` so the **Python API** gets the
-  same behaviour as the CLI.
-- An explicitly provided value always wins over any engine default.
-- Engines with no specific override fall back to the existing global default.
+- A central `ENGINE_DEFAULTS` registry maps `tunable -> {engine: value}`, holding
+  only the values that *diverge* from the generic fallback.
+- `resolve_engine_default(tunable, engine, value, fallback)` applies the rule:
+  explicit `value` wins, else an engine-specific override, else the `fallback`
+  (generic default supplied by the caller).
+- Resolution happens in the `Importer`/`Exporter` constructors so the **Python
+  API** gets the same behaviour as the CLI.
+- Engines with no specific override fall back to the generic default.
+
+The export side is wired through the same resolver (via `--fetch-size`) with no
+overrides registered yet, so adding an export engine default later is a one-line
+registry entry.
 
 ## Engine-specific default values
 
-> The values below are the home for finalised decisions. Entries marked **TBD**
-> are not yet agreed and are not implemented.
-
 ### Import `--batch-size`
-| Engine | Proposed default | Rationale |
+| Engine | Default | Rationale |
 |---|---|---|
-| `pyodbc` | `1000` (unchanged) | `executemany` trickle insert; small batches are fine and keep locks short. |
-| `duckdb` | `1000` (unchanged) | Same insert path as pyodbc. |
-| `mssql-python` | **TBD** (candidate: `1048576`) | Each `bulkcopy` batch closes a columnstore rowgroup; the default should produce a full, compressed rowgroup. Candidate is SQL Server's max rowgroup size; an alternative (~900,000) leaves headroom under the max. Final value pending sign-off. |
+| `pyodbc` | `1000` | `executemany` trickle insert; small batches are fine and keep locks short. |
+| `duckdb` | `1000` | Same insert path as pyodbc. |
+| `mssql-python` | `1048576` | Each `bulkcopy` batch closes a columnstore rowgroup, so the default produces one full, compressed rowgroup (SQL Server's max). |
 
 ### Export defaults
-No engine-specific export defaults are agreed yet. **TBD** whether any are
-warranted (e.g. `--fetch-size` is already ignored by the `duckdb` engine, so no
-override is needed there).
+No engine-specific export defaults are registered yet. The framework is wired
+through `--fetch-size`, so when a divergent value is identified it can be added
+as a single `ENGINE_DEFAULTS["fetch_size"]` entry. Note `--fetch-size` is already
+ignored by the `duckdb` engine, so any override would target `pyodbc`/
+`mssql-python`.
 
 ## Change log
 
-- _(unreleased)_ Documentation introduced; engine-aware default mechanism
-  proposed. No default values changed yet.
+- _(unreleased)_ Engine-aware default mechanism implemented. Import
+  `--batch-size` now defaults to `1048576` for the `mssql-python` engine
+  (unchanged `1000` elsewhere). Export framework wired via `--fetch-size` with
+  no overrides registered.
+- _(unreleased)_ Documentation introduced (the `docs/` folder).
