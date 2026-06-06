@@ -16,7 +16,13 @@ from pybutt.core.config import (
     resolve_engine_default,
     validate_identifier,
 )
-from pybutt.core.logobs import context, get_logger, init_worker_logging
+from pybutt.core.logobs import (
+    MemoryHeartbeat,
+    context,
+    get_logger,
+    init_worker_logging,
+    mem_fields,
+)
 from pybutt.exceptions import (
     ConfigurationError,
     DataExportError,
@@ -45,8 +51,11 @@ class Exporter(SqlServerIOBase):
         engine="duckdb",
         manifest_filename: str | None = None,
         parameters: str | None = None,
+        mem_heartbeat: float = 0,
     ):
         super().__init__(config)
+
+        self.mem_heartbeat = mem_heartbeat
 
         self.pk_column = validate_identifier(pk_column) if pk_column else None
         self.columns = [validate_identifier(c) for c in columns] if columns else None
@@ -495,6 +504,7 @@ class Exporter(SqlServerIOBase):
                 partition=f"{n}/{self.partition_count - 1}",
                 table=f"{self.schema}.{self.table}",
                 engine=self.engine,
+                **mem_fields(),
             )
         )
 
@@ -507,7 +517,9 @@ class Exporter(SqlServerIOBase):
                 self._export_partition_with_pyodbc(query, filepath, filename)
 
         try:
-            self.retry(_work, context=f"Export partition {n}")
+            # Heartbeat runs inside the worker process where the memory lives.
+            with MemoryHeartbeat(self.mem_heartbeat, unit=f"partition={n}"):
+                self.retry(_work, context=f"Export partition {n}")
         except MemoryError:
             logger.error(
                 "Out of memory during export - not retrying (fatal) "
@@ -536,6 +548,7 @@ class Exporter(SqlServerIOBase):
                 size_mb=f"{size_mb:.2f}",
                 seconds=f"{duration:.2f}",
                 progress=f"{n + 1}/{self.partition_count}",
+                **mem_fields(),
             )
         )
 

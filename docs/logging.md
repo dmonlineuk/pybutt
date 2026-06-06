@@ -49,6 +49,8 @@ keys you will see:
 | `rows` | Number of rows in the failing batch. |
 | `partition` | Export partition number. |
 | `rows_approx`, `size_mb`, `seconds`, `progress` | Per-file completion stats. |
+| `rss` | Current process resident set size (memory in use), e.g. `1.8GB`. |
+| `peak` | Highest RSS observed so far in this process. |
 
 Before this, a retrying import printed lines like
 `WARNING:root:batch in X.parquet retry 1/3 failed in X.parquet: Timeout` — with
@@ -99,6 +101,48 @@ with the row count and wall-clock seconds when it finishes.
 Per-row-group progress (import) and per-partition SQL (export) only appear at
 DEBUG so INFO stays readable on large runs.
 
+## Memory observability
+
+Every boundary log line carries `rss` (current resident memory) and `peak` (the
+highest RSS seen so far in that process). RSS is read cross-platform via
+`psutil`, so the same fields appear on Windows, Linux, BSD and macOS. Peak is
+tracked per process — import runs in one process (worker threads share it), while
+each spawned export worker tracks and reports its own peak.
+
+```
+2025-01-01 12:00:00 INFO [MainProcess/import_0] pybutt.importer: Importing file=dbo_Posts_part_00000.parquet table=dbo.Posts engine=mssql-python batch_size=1048576 transaction_mode=batch rss=180.4MB peak=180.4MB
+2025-01-01 12:27:37 INFO [MainProcess/import_0] pybutt.importer: Completed file=dbo_Posts_part_00000.parquet rows=9968353 seconds=1657.05 rss=2.1GB peak=2.1GB
+```
+
+The value of this is diagnosing the *silent* worker death described in
+[concepts.md](concepts.md): when the Linux OOM-killer SIGKILLs a worker there is
+no Python traceback, so the **last log line before the process vanishes** is the
+evidence. With `rss`/`peak` on every boundary you can see memory climbing and
+read off exactly which file/row-group/partition was in flight when it died.
+
+### Memory heartbeat (`--mem-heartbeat`)
+
+Boundary lines only print at file/row-group/partition transitions. A single very
+large unit can run for many minutes between them, so an OOM-kill mid-unit leaves
+a stale last line. The optional heartbeat logs RSS on a fixed interval regardless
+of progress:
+
+```bash
+# Log memory every 30 seconds during the run (0 = off, the default)
+pybutt import ... --mem-heartbeat 30
+pybutt export ... --mem-heartbeat 30
+```
+
+```
+2025-01-01 12:05:00 INFO [MainProcess/mem-heartbeat] pybutt.mem: Memory heartbeat unit=import rss=1.4GB peak=1.4GB
+2025-01-01 12:05:30 INFO [MainProcess/mem-heartbeat] pybutt.mem: Memory heartbeat unit=import rss=1.9GB peak=1.9GB
+2025-01-01 12:06:00 INFO [MainProcess/mem-heartbeat] pybutt.mem: Memory heartbeat unit=import rss=2.4GB peak=2.4GB
+```
+
+It is a low-overhead daemon thread, off by default so it adds no noise unless
+you are hunting a leak or an OOM-kill. On export the heartbeat runs inside each
+worker process (`unit=partition=N`), where the memory actually lives.
+
 ## Interpreting failures
 
 PyButt distinguishes transient, fatal, and abnormal failures.
@@ -128,7 +172,9 @@ peak memory (lower `--worker-count`, re-export with a smaller `--rowgroup-size`)
 
 On Windows/BSD, memory exhaustion typically surfaces as this `MemoryError`. On
 Linux it may instead be the OS OOM-killer terminating the worker outright (see
-below).
+below) — in that case there is no error line at all, so use the `rss`/`peak`
+trend on the preceding boundary lines (or a `--mem-heartbeat`) to confirm memory
+was the cause. See [Memory observability](#memory-observability) above.
 
 ### Worker failed (which unit died)
 

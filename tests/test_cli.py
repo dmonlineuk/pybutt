@@ -38,6 +38,7 @@ class DummyExporter:
         engine="duckdb",
         manifest_filename=None,
         parameters=None,
+        mem_heartbeat=0,
     ):
         self.config = config
         self.output_path = Path(output_path)
@@ -50,6 +51,7 @@ class DummyExporter:
         self.engine = engine
         self.manifest_filename = manifest_filename
         self.parameters = parameters
+        self.mem_heartbeat = mem_heartbeat
         DummyExporter.last_instance = self
 
     def perform_work(self):
@@ -71,6 +73,7 @@ class DummyImporter:
         temp_manifest_filename=None,
         delete_files=False,
         create_cci=True,
+        mem_heartbeat=0,
     ):
         self.config = config
         self.input_path = Path(input_path)
@@ -82,6 +85,7 @@ class DummyImporter:
         self.engine = engine
         self.delete_files = delete_files
         self.create_cci = create_cci
+        self.mem_heartbeat = mem_heartbeat
         DummyImporter.last_instance = self
 
     def perform_work(self):

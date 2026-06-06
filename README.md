@@ -752,6 +752,8 @@ pybutt import \
   file (duckdb engine) — not `--batch-size`. Re-export with a smaller
   `--rowgroup-size`, or avoid the duckdb engine for very large files.
 - Process smaller tables first to verify setup.
+- Diagnose with `--mem-heartbeat <seconds>` and the `rss`/`peak` fields on each
+  log line — see [docs/logging.md](docs/logging.md#memory-observability).
 - See [docs/concepts.md](docs/concepts.md) for the full memory model.
 
 **Frequent Batch/Rowgroup Failures:**
