@@ -514,6 +514,12 @@ class Exporter(SqlServerIOBase):
                 + context(partition=n, file=filename)
             )
             raise
+        except MemoryError:
+            logger.error(
+                "Out of memory during export - not retrying (fatal) "
+                + context(partition=n, file=filename)
+            )
+            raise
         except Exception as e:
             logger.error(
                 "Export partition failed "
