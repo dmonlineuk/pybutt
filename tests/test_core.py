@@ -7,8 +7,10 @@ import pytest
 
 from pybutt.core.base import SqlServerIOBase
 from pybutt.core.config import (
+    DEFAULT_IMPORT_BATCH_SIZE,
     SqlConfig,
     quote_identifier,
+    resolve_engine_default,
     validate_identifier,
 )
 from pybutt.exceptions import InvalidIdentifierError, MissingManifestEntryError
@@ -847,6 +849,79 @@ def test_importer_accepts_mssql_python_engine(tmp_path):
     )
 
     assert importer.engine == "mssql-python"
+
+
+def _import_config():
+    return SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+    )
+
+
+def test_resolve_engine_default_explicit_value_wins():
+    assert resolve_engine_default("batch_size", "mssql-python", 42, 1000) == 42
+
+
+def test_resolve_engine_default_uses_engine_override():
+    assert resolve_engine_default("batch_size", "mssql-python", None, 1000) == 1_048_576
+
+
+def test_resolve_engine_default_falls_back_for_other_engines():
+    assert resolve_engine_default("batch_size", "pyodbc", None, 1000) == 1000
+
+
+def test_resolve_engine_default_unknown_tunable_uses_fallback():
+    assert resolve_engine_default("nope", "mssql-python", None, 7) == 7
+
+
+def test_importer_default_batch_size_pyodbc(tmp_path):
+    importer = Importer(
+        config=_import_config(),
+        input_path=tmp_path,
+        manifest_filename="manifest.json",
+        engine="pyodbc",
+    )
+
+    assert importer.batch_size == DEFAULT_IMPORT_BATCH_SIZE
+
+
+def test_importer_default_batch_size_mssql_python(tmp_path):
+    importer = Importer(
+        config=_import_config(),
+        input_path=tmp_path,
+        manifest_filename="manifest.json",
+        engine="mssql-python",
+    )
+
+    assert importer.batch_size == 1_048_576
+
+
+def test_importer_explicit_batch_size_overrides_engine_default(tmp_path):
+    importer = Importer(
+        config=_import_config(),
+        input_path=tmp_path,
+        manifest_filename="manifest.json",
+        engine="mssql-python",
+        batch_size=500,
+    )
+
+    assert importer.batch_size == 500
+
+
+def test_exporter_fetch_size_no_engine_override(monkeypatch):
+    config = _import_config()
+    monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
+    exporter = Exporter(
+        config=config,
+        output_path=Path("./out"),
+        rowgroup_size=1_048_576,
+        engine="mssql-python",
+    )
+
+    assert exporter.fetch_size == 8192
 
 
 def test_connection_m_builds_correct_connection_string(monkeypatch):

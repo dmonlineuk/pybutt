@@ -237,7 +237,7 @@ pybutt import \
 --encrypt/--no-encrypt,       -e/-n   Enable/disable encrypted transport (default: enabled)
 --retries,                    -r      Number of retry attempts for transient errors (default: 3)
 --worker-count,               -w      Number of parallel import threads (default: 1)
---batch-size,                 -b      Rows per batch insert (default: 1000)
+--batch-size,                 -b      Rows per batch insert (default: 1000; mssql-python: 1048576)
 --engine,                     -E      Import engine to use: duckdb, pyodbc, or mssql-python (default: pyodbc)
 --transaction-mode,           -M      Transaction scope: row, batch (default), rowgroup, file
 --cci/--no-cci                        Create a clustered columnstore index on per-worker temp tables (default: enabled)
@@ -684,7 +684,7 @@ manifest:
 
 - **Export**: Increase `--worker-count` and `--file-count` for large tables (use values matching your CPU core count)
 - **Import**: Use `--worker-count` up to your CPU core count and adjust `--batch-size` (higher values = fewer database round trips)
-- **mssql-python engine**: Use `--engine mssql-python` for imports to leverage native bulk insert (`bulkcopy`) which is significantly faster than parameterized `INSERT` statements used by pyodbc
+- **mssql-python engine**: Use `--engine mssql-python` for imports to leverage native bulk insert (`bulkcopy`) which is significantly faster than parameterized `INSERT` statements used by pyodbc. Because each `bulkcopy` batch closes a columnstore rowgroup, `--batch-size` defaults to `1048576` for this engine (a full rowgroup) rather than `1000` — see [docs/defaults.md](docs/defaults.md)
 - **Primary Key Partitioning**: Use `--pk-column` for deterministic partitioning when re-importing the same data
 - **Encryption**: Use `--no-encrypt` only in secure networks to reduce overhead
 

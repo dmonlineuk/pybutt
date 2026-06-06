@@ -15,6 +15,7 @@ from pybutt.core.config import (
     ENGINE_CHOICES,
     SqlConfig,
     quote_identifier,
+    resolve_engine_default,
     validate_identifier,
 )
 from pybutt.exceptions import (
@@ -66,12 +67,13 @@ class Exporter(SqlServerIOBase):
         self.worker_count = worker_count
         self.file_count = file_count
         self.rowgroup_size = rowgroup_size
-        self.fetch_size = (
-            fetch_size
-            if fetch_size is not None
-            else min(max(1024, self.rowgroup_size), 8192)
-        )
         self.engine = engine
+        self.fetch_size = resolve_engine_default(
+            "fetch_size",
+            self.engine,
+            fetch_size,
+            min(max(1024, self.rowgroup_size), 8192),
+        )
 
         self.output_path = Path(output_path)
         self.output_path.mkdir(parents=True, exist_ok=True)

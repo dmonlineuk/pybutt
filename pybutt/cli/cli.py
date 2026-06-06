@@ -388,11 +388,11 @@ def import_data(
         help="Number of parallel import threads.",
         min=1,
     ),
-    batch_size: int = typer.Option(  # noqa: B008
-        1000,
+    batch_size: int | None = typer.Option(  # noqa: B008
+        None,
         "--batch-size",
         "-b",
-        help="Number of rows to insert per batch.",
+        help="Rows per batch insert. Default: 1000 (mssql-python: 1048576).",
         min=1,
     ),
     verbose: bool = typer.Option(  # noqa: B008
