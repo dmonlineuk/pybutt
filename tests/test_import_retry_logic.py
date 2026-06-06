@@ -649,7 +649,7 @@ class TestMssqlPythonBulkcopyRetry:
                 columns,
                 "[dbo].[MyTable]",
                 "test_file.parquet",
-                context="batch in test_file.parquet",
+                op="bulkcopy",
                 is_rows=True,
             )
 
@@ -681,7 +681,7 @@ class TestMssqlPythonBulkcopyRetry:
                 columns,
                 "[dbo].[MyTable]",
                 "test_file.parquet",
-                context="batch in test_file.parquet",
+                op="bulkcopy",
                 is_rows=True,
             )
 
@@ -709,7 +709,7 @@ class TestMssqlPythonBulkcopyRetry:
                     columns,
                     "[dbo].[MyTable]",
                     "test_file.parquet",
-                    context="batch in test_file.parquet",
+                    op="bulkcopy",
                     is_rows=True,
                 )
 
@@ -733,7 +733,7 @@ class TestMssqlPythonBulkcopyRetry:
                 columns,
                 "[dbo].[MyTable]",
                 "test_file.parquet",
-                context="batch in test_file.parquet",
+                op="bulkcopy",
                 is_rows=False,
             )
 

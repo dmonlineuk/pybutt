@@ -221,7 +221,7 @@ def test_export_command_manifest_version_is_2(monkeypatch, tmp_path):
             return [func(arg) for arg in args]
 
     class DummyContext:
-        def Pool(self, count):
+        def Pool(self, count, **kwargs):
             return DummyPool()
 
     monkeypatch.setattr(exporter_module, "get_context", lambda _: DummyContext())
@@ -298,7 +298,7 @@ def test_export_command_supports_view_like_objects(monkeypatch, tmp_path):
             return [func(arg) for arg in args]
 
     class DummyContext:
-        def Pool(self, count):
+        def Pool(self, count, **kwargs):
             return DummyPool()
 
     monkeypatch.setattr(

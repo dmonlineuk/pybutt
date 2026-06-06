@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import getpass
 import json
-import logging
 import tomllib
 from pathlib import Path
 
@@ -13,6 +12,7 @@ from pybutt.core.config import (
     SqlConfig,
     TransactionMode,
 )
+from pybutt.core.logobs import configure_logging
 from pybutt.files.files import (
     inspect_manifest,
     load_manifest,
@@ -260,8 +260,7 @@ def export(
     creates a manifest file listing the generated parquet file names.
     """
 
-    if verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    configure_logging(verbose)
 
     config = build_sql_config(
         server=server,
@@ -439,8 +438,7 @@ def import_data(
     target table using parameterized batch inserts.
     """
 
-    if verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    configure_logging(verbose)
 
     config = build_sql_config(
         server=server,
@@ -530,8 +528,7 @@ def merge(
 ) -> None:
     """Merge manifest entries according to manifest type."""
 
-    if verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    configure_logging(verbose)
 
     manifest = load_manifest(manifest_path)
 

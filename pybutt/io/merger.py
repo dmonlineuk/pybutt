@@ -1,14 +1,14 @@
-import logging
 from collections.abc import Iterable
 
 from pybutt.core.base import SqlServerIOBase
 from pybutt.core.config import ENGINE_CHOICES, TransactionMode
+from pybutt.core.logobs import context, get_logger
 from pybutt.exceptions import (
     EngineSelectionError,
     SchemaMismatchError,
 )
 
-logging.basicConfig(level=logging.INFO)
+logger = get_logger("merger")
 
 
 class TableMerger(SqlServerIOBase):
@@ -95,9 +95,12 @@ class TableMerger(SqlServerIOBase):
                 # Insert from each source
                 for src in self.sources:
                     src_schema, src_table = self._parse_schema_table(src)
-                    logging.info(
-                        f"Merging {src_schema}.{src_table} -> "
-                        f"{target_schema}.{target_table}"
+                    logger.info(
+                        "Merging "
+                        + context(
+                            source=f"{src_schema}.{src_table}",
+                            target=f"{target_schema}.{target_table}",
+                        )
                     )
                     try:
                         cur.execute(
@@ -109,4 +112,4 @@ class TableMerger(SqlServerIOBase):
                         conn.rollback()
                         raise
 
-        logging.info("Table merge completed")
+        logger.info("Table merge completed")

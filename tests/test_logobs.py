@@ -1,0 +1,214 @@
+"""Tests for the centralised logging/observability helpers (Phase 1).
+
+Covers:
+- ``context`` structured key=value rendering (and None skipping)
+- ``configure_logging`` idempotency, level, and propagation
+- ``get_logger`` naming under the ``pybutt`` hierarchy
+- ``MemoryError`` is logged and re-raised (never retried) in ``base.retry``
+  and the importer batch/rowgroup retry helpers
+- worker-failure surfacing names the failing unit before re-raising
+"""
+
+import logging
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from pybutt.core.base import SqlServerIOBase
+from pybutt.core.config import SqlConfig, TransactionMode
+from pybutt.core.logobs import (
+    LOGGER_NAME,
+    configure_logging,
+    context,
+    get_logger,
+    init_worker_logging,
+)
+from pybutt.io.importer import Importer
+
+
+@pytest.fixture
+def mock_config():
+    return SqlConfig(
+        server="localhost",
+        database="TestDb",
+        schema="dbo",
+        table="MyTable",
+        trusted_connection=True,
+        retries=3,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _reset_pybutt_logger():
+    """Restore the pybutt logger to a clean state around each test."""
+    logger = logging.getLogger(LOGGER_NAME)
+    saved_handlers = logger.handlers[:]
+    saved_level = logger.level
+    saved_propagate = logger.propagate
+    logger.handlers = []
+    yield
+    logger.handlers = saved_handlers
+    logger.level = saved_level
+    logger.propagate = saved_propagate
+
+
+# --- context() ------------------------------------------------------------
+
+
+def test_context_renders_key_values():
+    assert context(file="a.parquet", rg="3/40", batch=12) == (
+        "file=a.parquet rg=3/40 batch=12"
+    )
+
+
+def test_context_skips_none_but_keeps_zero():
+    # offset=0 must be kept (it is a valid identifier); only None is dropped.
+    assert context(file="a.parquet", rg=None, offset=0) == "file=a.parquet offset=0"
+
+
+def test_context_empty_when_all_none():
+    assert context(rg=None, batch=None) == ""
+
+
+# --- get_logger / configure_logging --------------------------------------
+
+
+def test_get_logger_names_are_under_pybutt():
+    assert get_logger().name == "pybutt"
+    assert get_logger("importer").name == "pybutt.importer"
+
+
+def test_configure_logging_is_idempotent():
+    configure_logging()
+    configure_logging()
+    configure_logging(verbose=True)
+    logger = logging.getLogger(LOGGER_NAME)
+    pybutt_handlers = [
+        h for h in logger.handlers if getattr(h, "_pybutt_handler", False)
+    ]
+    assert len(pybutt_handlers) == 1
+
+
+def test_configure_logging_sets_level_and_disables_propagation():
+    logger = configure_logging(verbose=False)
+    assert logger.level == logging.INFO
+    assert logger.propagate is False
+
+    logger = configure_logging(verbose=True)
+    assert logger.level == logging.DEBUG
+
+
+def test_init_worker_logging_configures_level():
+    init_worker_logging(logging.DEBUG)
+    logger = logging.getLogger(LOGGER_NAME)
+    assert logger.level == logging.DEBUG
+    assert any(getattr(h, "_pybutt_handler", False) for h in logger.handlers)
+
+
+def test_formatted_line_contains_identity_and_context():
+    # propagate is False by design, so format a record through the handler's
+    # own formatter rather than relying on caplog (which sits on the root).
+    configure_logging()
+    logger = logging.getLogger(LOGGER_NAME)
+    handler = next(h for h in logger.handlers if getattr(h, "_pybutt_handler", False))
+    record = logging.LogRecord(
+        name="pybutt.importer",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="Importing " + context(file="a.parquet", rg="1/2"),
+        args=(),
+        exc_info=None,
+    )
+    line = handler.formatter.format(record)
+    assert "INFO" in line
+    assert "pybutt.importer" in line
+    assert "[MainProcess/" in line  # processName/threadName identity
+    assert "file=a.parquet" in line
+    assert "rg=1/2" in line
+
+
+# --- MemoryError fail-fast -------------------------------------------------
+
+
+def test_base_retry_does_not_retry_memoryerror(mock_config):
+    base = SqlServerIOBase(mock_config)
+    fn = MagicMock(side_effect=MemoryError("oom"))
+    with patch("time.sleep") as sleep:
+        with pytest.raises(MemoryError):
+            base.retry(fn, context="unit")
+    assert fn.call_count == 1  # not retried
+    sleep.assert_not_called()
+
+
+def test_importer_batch_retry_does_not_retry_memoryerror(tmp_path, mock_config):
+    importer = Importer(
+        config=mock_config,
+        input_path=tmp_path,
+        manifest_filename="manifest.json",
+        batch_size=1000,
+        transaction_mode=TransactionMode.BATCH,
+    )
+    cur = MagicMock()
+    cur.executemany.side_effect = MemoryError("oom")
+    conn = MagicMock()
+    with patch("time.sleep") as sleep:
+        with pytest.raises(MemoryError):
+            importer._import_batch_with_retry(
+                conn, cur, [(1,)], "INSERT", "f.parquet", batch=0, offset=0
+            )
+    assert cur.executemany.call_count == 1
+    sleep.assert_not_called()
+
+
+def test_importer_batch_retry_retries_other_errors(tmp_path, mock_config):
+    importer = Importer(
+        config=mock_config,
+        input_path=tmp_path,
+        manifest_filename="manifest.json",
+        batch_size=1000,
+        transaction_mode=TransactionMode.BATCH,
+    )
+    cur = MagicMock()
+    cur.executemany.side_effect = [ValueError("boom"), None]
+    conn = MagicMock()
+    with patch("time.sleep"):
+        result = importer._import_batch_with_retry(
+            conn, cur, [(1,)], "INSERT", "f.parquet", batch=0, offset=0
+        )
+    assert result == 1
+    assert cur.executemany.call_count == 2  # retried once then succeeded
+
+
+# --- worker failure surfacing ---------------------------------------------
+
+
+def test_await_futures_logs_failing_unit(tmp_path, mock_config, caplog):
+    importer = Importer(
+        config=mock_config,
+        input_path=tmp_path,
+        manifest_filename="manifest.json",
+        batch_size=1000,
+        transaction_mode=TransactionMode.BATCH,
+    )
+
+    def boom():
+        raise ValueError("worker died")
+
+    # Attach caplog's handler to the pybutt logger directly: the logger has
+    # propagate=False once configured, so it would not reach caplog's root handler.
+    pybutt_logger = logging.getLogger(LOGGER_NAME)
+    pybutt_logger.addHandler(caplog.handler)
+    pybutt_logger.setLevel(logging.ERROR)
+
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        futures = {ex.submit(boom): "dbo_Posts_part_00000.parquet"}
+        with pytest.raises(ValueError):
+            importer._await_futures(futures, label="file")
+
+    messages = [r.message for r in caplog.records]
+    assert any(
+        "Worker failed" in m and "file=dbo_Posts_part_00000.parquet" in m
+        for m in messages
+    )
