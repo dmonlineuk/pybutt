@@ -745,8 +745,14 @@ pybutt import \
 - Ensure the table exists and contains data
 
 **Memory Issues:**
-- Reduce `--worker-count` or `--batch-size`
-- Process smaller tables first to verify setup
+- Reduce `--worker-count` — it multiplies per-worker memory in both directions.
+- Export: lower `--rowgroup-size`. The writer buffers a whole rowgroup in memory,
+  so this (not `--fetch-size`) drives export memory.
+- Import: peak memory is one Parquet rowgroup (pyodbc/mssql-python) or the whole
+  file (duckdb engine) — not `--batch-size`. Re-export with a smaller
+  `--rowgroup-size`, or avoid the duckdb engine for very large files.
+- Process smaller tables first to verify setup.
+- See [docs/concepts.md](docs/concepts.md) for the full memory model.
 
 **Frequent Batch/Rowgroup Failures:**
 - Increase `--retries` and `--batch-size` for more resilient imports
