@@ -20,6 +20,10 @@ informed choices.
 4. **[Defaults](defaults.md)** — the current defaults, and the (evolving)
    rationale for engine-specific defaults. This is the living record we update as
    new tuning options and per-engine defaults are introduced.
+5. **[Logging](logging.md)** — how to read PyButt's output: the log format,
+   the structured `file`/`rg`/`batch`/`offset` identifiers, how to enable
+   verbose (`DEBUG`) output, and how to interpret failures (timeouts, retries,
+   out-of-memory, abnormal worker death).
 
 ## Scope of these docs
 

@@ -291,7 +291,7 @@ def test_exporter_writes_manifest_version_2(monkeypatch, tmp_path):
             return [func(arg) for arg in args]
 
     class DummyContext:
-        def Pool(self, count):
+        def Pool(self, count, **kwargs):
             return DummyPool()
 
     monkeypatch.setattr("pybutt.io.exporter.get_context", lambda _: DummyContext())

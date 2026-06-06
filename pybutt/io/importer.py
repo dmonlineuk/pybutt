@@ -1,6 +1,4 @@
 import json
-import logging
-import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -17,6 +15,7 @@ from pybutt.core.config import (
     quote_identifier,
     resolve_engine_default,
 )
+from pybutt.core.logobs import context, get_logger
 from pybutt.exceptions import (
     BatchImportError,
     EngineSelectionError,
@@ -31,7 +30,7 @@ from pybutt.files.files import (
     validate_manifest_entries,
 )
 
-logging.basicConfig(level=logging.INFO)
+logger = get_logger("importer")
 
 
 class Importer(SqlServerIOBase):
@@ -134,16 +133,18 @@ class Importer(SqlServerIOBase):
 
     def import_file(self, filename, target_table: str | None = None):
         filepath = self.input_path / filename
-        thread_id = threading.get_ident()
         start = time.time()
         target_table_name = target_table or self.full_table_name()
 
-        logging.info(
-            f"Thread={thread_id} "
-            f"Importing file={filename} "
-            f"table={target_table_name} "
-            f"batch_size={self.batch_size} "
-            f"transaction_mode={self.transaction_mode.value}"
+        logger.info(
+            "Importing "
+            + context(
+                file=filename,
+                table=target_table_name,
+                engine=self.engine,
+                batch_size=self.batch_size,
+                transaction_mode=self.transaction_mode.value,
+            )
         )
 
         try:
@@ -177,8 +178,18 @@ class Importer(SqlServerIOBase):
                     self._import_file_impl(
                         filepath, filename, start, target_table=target_table
                     )
+        except MemoryError:
+            logger.error(
+                "Out of memory - not retrying (fatal) " + context(file=filename)
+            )
+            raise
         except Exception as e:
-            logging.error(f"Failed importing {filename}: {self.safe_error_message(e)}")
+            logger.error(
+                "Failed importing "
+                + context(file=filename)
+                + f": {self.safe_error_message(e)}"
+            )
+            logger.debug("Traceback for failed import of %s", filename, exc_info=True)
             raise
 
         return True
@@ -201,7 +212,8 @@ class Importer(SqlServerIOBase):
 
                 total_rows = 0
 
-                for rg_idx in range(parquet_file.num_row_groups):
+                total_rg = parquet_file.num_row_groups
+                for rg_idx in range(total_rg):
                     table = parquet_file.read_row_group(rg_idx)
 
                     if self.transaction_mode == TransactionMode.ROWGROUP:
@@ -212,15 +224,24 @@ class Importer(SqlServerIOBase):
                             insert_sql,
                             filename,
                             rg_idx,
-                            parquet_file.num_row_groups,
+                            total_rg,
                         )
                         total_rows += rows_in_rg
                     else:
-                        for batch in table.to_batches(max_chunksize=self.batch_size):
+                        for batch_idx, batch in enumerate(
+                            table.to_batches(max_chunksize=self.batch_size)
+                        ):
                             if self.transaction_mode == TransactionMode.BATCH:
                                 rows = self._rows_from_batch(batch)
                                 rows_in_batch = self._import_batch_with_retry(
-                                    c, cur, rows, insert_sql, filename
+                                    c,
+                                    cur,
+                                    rows,
+                                    insert_sql,
+                                    filename,
+                                    rg=f"{rg_idx + 1}/{total_rg}",
+                                    batch=batch_idx,
+                                    offset=total_rows,
                                 )
                                 total_rows += rows_in_batch
                             else:
@@ -229,18 +250,22 @@ class Importer(SqlServerIOBase):
                                 total_rows += len(rows)
 
                         if self.transaction_mode != TransactionMode.BATCH:
-                            logging.info(
-                                f"{filename}: processed row group {rg_idx+1}/"
-                                f"{parquet_file.num_row_groups}"
+                            logger.debug(
+                                "Processed row group "
+                                + context(file=filename, rg=f"{rg_idx + 1}/{total_rg}")
                             )
 
                 # Commit after entire file if in FILE mode
                 if self.transaction_mode == TransactionMode.FILE:
                     c.commit()
 
-                logging.info(
-                    f"Completed file={filename}, total rows: {total_rows}, in "
-                    f"{time.time() - start:.2f}s"
+                logger.info(
+                    "Completed "
+                    + context(
+                        file=filename,
+                        rows=total_rows,
+                        seconds=f"{time.time() - start:.2f}",
+                    )
                 )
 
     def _load_parquet_with_duckdb(self, filepath):
@@ -285,13 +310,19 @@ class Importer(SqlServerIOBase):
                         )
                         total_rows += rows_in_rg
                 else:
-                    for batch in parquet_table.to_batches(
-                        max_chunksize=self.batch_size
+                    for batch_idx, batch in enumerate(
+                        parquet_table.to_batches(max_chunksize=self.batch_size)
                     ):
                         rows = self._rows_from_batch(batch)
                         if self.transaction_mode == TransactionMode.BATCH:
                             rows_in_batch = self._import_batch_with_retry(
-                                c, cur, rows, insert_sql, filename
+                                c,
+                                cur,
+                                rows,
+                                insert_sql,
+                                filename,
+                                batch=batch_idx,
+                                offset=total_rows,
                             )
                             total_rows += rows_in_batch
                         else:
@@ -301,9 +332,13 @@ class Importer(SqlServerIOBase):
                 if self.transaction_mode == TransactionMode.FILE:
                     c.commit()
 
-                logging.info(
-                    f"Completed file={filename}, total rows: {total_rows}, in "
-                    f"{time.time() - start:.2f}s"
+                logger.info(
+                    "Completed "
+                    + context(
+                        file=filename,
+                        rows=total_rows,
+                        seconds=f"{time.time() - start:.2f}",
+                    )
                 )
 
     def _import_file_with_mssql(
@@ -332,8 +367,9 @@ class Importer(SqlServerIOBase):
 
             total_rows = 0
 
+            total_rg = parquet_file.num_row_groups
             if self.transaction_mode == TransactionMode.ROWGROUP:
-                for rg_idx in range(parquet_file.num_row_groups):
+                for rg_idx in range(total_rg):
                     table = parquet_file.read_row_group(rg_idx)
                     rows_in_rg = self._mssql_bulkcopy_with_retry(
                         conn,
@@ -341,17 +377,21 @@ class Importer(SqlServerIOBase):
                         columns,
                         target_table_name,
                         filename,
-                        context=f"row group {rg_idx + 1}/{parquet_file.num_row_groups}",
+                        op="bulkcopy(rowgroup)",
+                        rg=f"{rg_idx + 1}/{total_rg}",
+                        offset=total_rows,
                     )
                     total_rows += rows_in_rg
-                    logging.info(
-                        f"{filename}: processed row group {rg_idx + 1}/"
-                        f"{parquet_file.num_row_groups}"
+                    logger.debug(
+                        "Processed row group "
+                        + context(file=filename, rg=f"{rg_idx + 1}/{total_rg}")
                     )
             else:
-                for rg_idx in range(parquet_file.num_row_groups):
+                for rg_idx in range(total_rg):
                     table = parquet_file.read_row_group(rg_idx)
-                    for batch in table.to_batches(max_chunksize=self.batch_size):
+                    for batch_idx, batch in enumerate(
+                        table.to_batches(max_chunksize=self.batch_size)
+                    ):
                         rows = self._rows_from_batch(batch)
                         if self.transaction_mode == TransactionMode.BATCH:
                             rows_in_batch = self._mssql_bulkcopy_with_retry(
@@ -360,7 +400,10 @@ class Importer(SqlServerIOBase):
                                 columns,
                                 target_table_name,
                                 filename,
-                                context=f"batch in {filename}",
+                                op="bulkcopy(batch)",
+                                rg=f"{rg_idx + 1}/{total_rg}",
+                                batch=batch_idx,
+                                offset=total_rows,
                                 is_rows=True,
                             )
                             total_rows += rows_in_batch
@@ -379,9 +422,13 @@ class Importer(SqlServerIOBase):
             if self.transaction_mode == TransactionMode.FILE:
                 conn.commit()
 
-            logging.info(
-                f"Completed file={filename}, total rows: {total_rows}, in "
-                f"{time.time() - start:.2f}s"
+            logger.info(
+                "Completed "
+                + context(
+                    file=filename,
+                    rows=total_rows,
+                    seconds=f"{time.time() - start:.2f}",
+                )
             )
         finally:
             conn.close()
@@ -393,7 +440,10 @@ class Importer(SqlServerIOBase):
         columns,
         target_table_name,
         filename,
-        context="operation",
+        op="bulkcopy",
+        rg=None,
+        batch=None,
+        offset=None,
         is_rows=False,
     ):
         """Execute bulkcopy with retry logic."""
@@ -423,26 +473,50 @@ class Importer(SqlServerIOBase):
                     if isinstance(result, dict)
                     else len(rows)
                 )
+            except MemoryError:
+                logger.error(
+                    f"Out of memory during {op} - not retrying (fatal) "
+                    + context(file=filename, rg=rg, batch=batch, offset=offset)
+                )
+                raise
             except Exception as e:
                 safe_msg = self.safe_error_message(e)
                 if attempt < self.config.retries - 1:
-                    logging.warning(
-                        f"{context} retry {attempt + 1}/{self.config.retries} "
-                        f"failed in {filename}: {safe_msg}"
+                    logger.warning(
+                        f"{op} attempt {attempt + 1}/{self.config.retries} failed "
+                        + context(
+                            file=filename,
+                            rg=rg,
+                            batch=batch,
+                            rows=len(rows),
+                            offset=offset,
+                        )
+                        + f": {safe_msg}"
                     )
                     conn.rollback()
                     time.sleep(2**attempt)
                 else:
                     raise BatchImportError(
-                        f"Bulk copy failed after {self.config.retries} retries: "
-                        f"{safe_msg}"
+                        f"Bulk copy failed after {self.config.retries} retries "
+                        + context(file=filename, rg=rg, batch=batch, offset=offset)
+                        + f": {safe_msg}"
                     ) from None
 
     def _rows_from_arrow_table(self, table):
         """Convert a PyArrow table to a list of tuples for bulkcopy."""
         return list(zip(*[col.to_pylist() for col in table.columns], strict=True))
 
-    def _import_batch_with_retry(self, c, cur, rows_or_batch, insert_sql, filename):
+    def _import_batch_with_retry(
+        self,
+        c,
+        cur,
+        rows_or_batch,
+        insert_sql,
+        filename,
+        rg=None,
+        batch=None,
+        offset=None,
+    ):
         """Import a single batch with retry logic for BATCH mode."""
         rows = (
             rows_or_batch
@@ -455,26 +529,42 @@ class Importer(SqlServerIOBase):
                 cur.executemany(insert_sql, rows)
                 c.commit()
                 return len(rows)
+            except MemoryError:
+                logger.error(
+                    "Out of memory during batch insert - not retrying (fatal) "
+                    + context(file=filename, rg=rg, batch=batch, offset=offset)
+                )
+                raise
             except Exception as e:
                 safe_msg = self.safe_error_message(e)
 
                 if attempt < self.config.retries - 1:
-                    logging.warning(
-                        f"Batch retry {attempt+1}/{self.config.retries} failed in "
-                        f"{filename}: {safe_msg}"
+                    logger.warning(
+                        f"batch insert attempt {attempt+1}/{self.config.retries} "
+                        "failed "
+                        + context(
+                            file=filename,
+                            rg=rg,
+                            batch=batch,
+                            rows=len(rows),
+                            offset=offset,
+                        )
+                        + f": {safe_msg}"
                     )
                     c.rollback()
                     time.sleep(2**attempt)
                 else:
                     raise BatchImportError(
-                        f"Batch import failed after {self.config.retries} retries: "
-                        f"{safe_msg}"
+                        f"Batch import failed after {self.config.retries} retries "
+                        + context(file=filename, rg=rg, batch=batch, offset=offset)
+                        + f": {safe_msg}"
                     ) from None
 
     def _import_rowgroup_with_retry(
         self, c, cur, table_or_batch, insert_sql, filename, rg_idx, total_rg
     ):
         """Import a single row group with retry logic for ROWGROUP mode."""
+        rg = f"{rg_idx + 1}/{total_rg}"
         for attempt in range(self.config.retries):
             try:
                 total_rows = 0
@@ -493,22 +583,29 @@ class Importer(SqlServerIOBase):
                     total_rows += len(rows)
 
                 c.commit()
-                logging.info(f"{filename}: processed row group {rg_idx+1}/{total_rg}")
+                logger.debug("Processed row group " + context(file=filename, rg=rg))
                 return total_rows
+            except MemoryError:
+                logger.error(
+                    "Out of memory during rowgroup insert - not retrying (fatal) "
+                    + context(file=filename, rg=rg)
+                )
+                raise
             except Exception as e:
                 safe_msg = self.safe_error_message(e)
 
                 if attempt < self.config.retries - 1:
-                    logging.warning(
-                        f"Row group retry {attempt+1}/{self.config.retries} failed in "
-                        f"{filename}: {safe_msg}"
+                    logger.warning(
+                        f"rowgroup insert attempt {attempt+1}/{self.config.retries} "
+                        "failed " + context(file=filename, rg=rg) + f": {safe_msg}"
                     )
                     c.rollback()
                     time.sleep(2**attempt)
                 else:
                     raise RowGroupImportError(
-                        f"Row group import failed after {self.config.retries} retries: "
-                        f"{safe_msg}"
+                        f"Row group import failed after {self.config.retries} retries "
+                        + context(file=filename, rg=rg)
+                        + f": {safe_msg}"
                     ) from None
 
     def _make_temp_table_name(self, worker_index: int) -> str:
@@ -612,34 +709,55 @@ class Importer(SqlServerIOBase):
             temp_tables = self._create_temp_tables(worker_count)
             assignments = self._assign_files_to_workers(filenames, temp_tables)
 
-            with ThreadPoolExecutor(max_workers=worker_count) as executor:
-                futures = [
+            with ThreadPoolExecutor(
+                max_workers=worker_count, thread_name_prefix="import"
+            ) as executor:
+                futures = {
                     executor.submit(
                         self._import_files_to_temp_table, target_table, assigned
-                    )
+                    ): target_table
                     for target_table, assigned in assignments.items()
                     if assigned
-                ]
+                }
 
-                for future in as_completed(futures):
-                    future.result()
+                self._await_futures(futures, label="table")
 
             manifest_file = self._write_temp_manifest(temp_tables)
-            logging.info(f"Wrote temporary table manifest: {manifest_file}")
+            logger.info("Wrote temporary table manifest " + context(file=manifest_file))
             if self.delete_files:
                 self._delete_original_files(filenames)
             return
 
-        with ThreadPoolExecutor(max_workers=self.worker_count) as executor:
-            futures = [
-                executor.submit(self.import_file, filename) for filename in filenames
-            ]
+        with ThreadPoolExecutor(
+            max_workers=self.worker_count, thread_name_prefix="import"
+        ) as executor:
+            futures = {
+                executor.submit(self.import_file, filename): filename
+                for filename in filenames
+            }
 
-            for future in as_completed(futures):
-                future.result()
+            self._await_futures(futures, label="file")
 
         if self.delete_files:
             self._delete_original_files(filenames)
+
+    def _await_futures(self, futures, label):
+        """Wait for worker futures, surfacing which unit failed before re-raising.
+
+        Without this, a worker exception only re-raises as a bare traceback with
+        no indication of *which* file/table the dead worker was handling.
+        """
+        for future in as_completed(futures):
+            unit = futures[future]
+            try:
+                future.result()
+            except Exception as e:
+                logger.error(
+                    "Worker failed "
+                    + context(**{label: unit})
+                    + f": {self.safe_error_message(e)}"
+                )
+                raise
 
 
 if __name__ == "__main__":

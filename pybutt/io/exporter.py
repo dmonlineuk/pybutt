@@ -1,7 +1,5 @@
 import json as j
-import logging
 import math as m
-import threading
 import time
 from multiprocessing import get_context
 from pathlib import Path
@@ -18,6 +16,7 @@ from pybutt.core.config import (
     resolve_engine_default,
     validate_identifier,
 )
+from pybutt.core.logobs import context, get_logger, init_worker_logging
 from pybutt.exceptions import (
     ConfigurationError,
     DataExportError,
@@ -29,7 +28,7 @@ from pybutt.files.files import (
     default_manifest_filename,
 )
 
-logging.basicConfig(level=logging.INFO)
+logger = get_logger("exporter")
 
 
 class Exporter(SqlServerIOBase):
@@ -107,7 +106,7 @@ class Exporter(SqlServerIOBase):
                 )
 
                 if row_count == 0:
-                    logging.info(
+                    logger.info(
                         "Partition stats returned zero rows; falling back to COUNT(*)"
                     )
                     count_query = f"SELECT COUNT(*) FROM {self._source_reference()}"
@@ -128,17 +127,22 @@ class Exporter(SqlServerIOBase):
         self.partition_count = self.file_count
         self.chunk_size = m.ceil(self.total_rows / self.partition_count)
 
-        logging.info(
-            f"Partitioning table={self.schema}.{self.table} "
-            f"total_rows={self.total_rows} "
-            f"file_count={self.file_count} "
-            f"chunk_size={self.chunk_size}"
+        logger.info(
+            "Partitioning "
+            + context(
+                table=f"{self.schema}.{self.table}",
+                total_rows=self.total_rows,
+                file_count=self.file_count,
+                chunk_size=self.chunk_size,
+            )
         )
 
         if self.pk_column:
-            logging.info(f"Partition strategy=ROW_NUMBER pk={self.pk_column}")
+            logger.info("Partition strategy=ROW_NUMBER " + context(pk=self.pk_column))
         else:
-            logging.info(f"Partition strategy=CHECKSUM modulo={self.partition_count}")
+            logger.info(
+                "Partition strategy=CHECKSUM " + context(modulo=self.partition_count)
+            )
 
     def get_table_columns(self):
         query = f"""
@@ -477,20 +481,21 @@ class Exporter(SqlServerIOBase):
             conn.close()
 
     def export_partition(self, n):
-        thread_id = threading.get_ident()
         start = time.time()
         safe_name = f"{self.schema}_{self.table}"
         filename = f"{safe_name}_part_{n:05d}.parquet"
         filepath = self.output_path / filename
         query = self.build_partition_query(n)
 
-        logging.debug(f"Partition {n} query: {query}")
-        logging.info(
-            f"Thread={thread_id} "
-            f"Exporting file={filename} "
-            f"partition={n}/{self.partition_count-1} "
-            f"table={self.schema}.{self.table} "
-            f"engine={self.engine}"
+        logger.debug("Partition query " + context(partition=n) + f": {query}")
+        logger.info(
+            "Exporting "
+            + context(
+                file=filename,
+                partition=f"{n}/{self.partition_count - 1}",
+                table=f"{self.schema}.{self.table}",
+                engine=self.engine,
+            )
         )
 
         def _work():
@@ -501,19 +506,31 @@ class Exporter(SqlServerIOBase):
             else:
                 self._export_partition_with_pyodbc(query, filepath, filename)
 
-        self.retry(_work, context=f"Export partition {n}")
+        try:
+            self.retry(_work, context=f"Export partition {n}")
+        except Exception as e:
+            logger.error(
+                "Export partition failed "
+                + context(partition=n, file=filename)
+                + f": {self.safe_error_message(e)}"
+            )
+            logger.debug("Traceback for partition %s", n, exc_info=True)
+            raise
 
         duration = time.time() - start
         if filepath.exists():
             size_mb = filepath.stat().st_size / (1024 * 1024)
         else:
             size_mb = 0
-        logging.info(
-            f"Completed file={filename} "
-            f"rows~{self.chunk_size} "
-            f"size={size_mb:.2f} MB "
-            f"time={duration:.2f}s "
-            f"Progress: {n+1}/{self.partition_count}"
+        logger.info(
+            "Completed "
+            + context(
+                file=filename,
+                rows_approx=self.chunk_size,
+                size_mb=f"{size_mb:.2f}",
+                seconds=f"{duration:.2f}",
+                progress=f"{n + 1}/{self.partition_count}",
+            )
         )
 
         return filename
@@ -522,18 +539,39 @@ class Exporter(SqlServerIOBase):
         start = time.time()
         manifest_file = self.output_path / self.manifest_filename
 
-        with get_context("spawn").Pool(self.worker_count) as p:
-            filenames = p.map(self.export_partition, range(self.partition_count))
+        # Spawned worker processes re-import modules and do NOT inherit the
+        # parent's logging config, so configure it in each via the initialiser
+        # (spawn is the default on Windows/macOS and is forced here on all OSes).
+        worker_level = get_logger().getEffectiveLevel()
+        try:
+            with get_context("spawn").Pool(
+                self.worker_count,
+                initializer=init_worker_logging,
+                initargs=(worker_level,),
+            ) as p:
+                filenames = p.map(self.export_partition, range(self.partition_count))
+        except Exception as e:
+            # A worker killed abruptly (e.g. OOM/SIGKILL) surfaces here without a
+            # partition context; make the likely cause explicit.
+            logger.error(
+                "Export pool failed - a worker may have terminated abnormally "
+                "(possible out-of-memory/SIGKILL); check earlier per-partition "
+                f"logs: {self.safe_error_message(e)}"
+            )
+            raise
 
         duration = time.time() - start
 
-        logging.info(
-            f"Export complete table={self.schema}.{self.table} "
-            f"files={len(filenames)} "
-            f"time={duration:.2f}s"
+        logger.info(
+            "Export complete "
+            + context(
+                table=f"{self.schema}.{self.table}",
+                files=len(filenames),
+                seconds=f"{duration:.2f}",
+            )
         )
 
-        logging.info(f"Writing manifest: {manifest_file}")
+        logger.info("Writing manifest " + context(file=manifest_file))
         try:
             with open(manifest_file, "w") as f:
                 j.dump(
@@ -545,14 +583,15 @@ class Exporter(SqlServerIOBase):
                     f,
                     indent=4,
                 )
-            logging.info(
-                f"Manifest written: {manifest_file} " f"files={len(filenames)}"
+            logger.info(
+                "Manifest written " + context(file=manifest_file, files=len(filenames))
             )
 
         except Exception as e:
-            logging.error(
-                f"Failed to write manifest {manifest_file}: "
-                f"{self.safe_error_message(e)}"
+            logger.error(
+                "Failed to write manifest "
+                + context(file=manifest_file)
+                + f": {self.safe_error_message(e)}"
             )
 
 

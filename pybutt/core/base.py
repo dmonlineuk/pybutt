@@ -1,4 +1,3 @@
-import logging
 import re
 import time
 
@@ -13,8 +12,9 @@ from .config import (
     quote_identifier,
     validate_identifier,
 )
+from .logobs import get_logger
 
-logging.basicConfig(level=logging.INFO)
+logger = get_logger("base")
 
 
 class SqlServerIOBase:
@@ -105,11 +105,14 @@ class SqlServerIOBase:
         for attempt in range(self.config.retries):
             try:
                 return fn()
+            except MemoryError:
+                logger.error(f"{context} out of memory - not retrying (fatal)")
+                raise
             except Exception as e:
                 last_error = e
                 safe_msg = self.safe_error_message(e)
-                logging.warning(
-                    f"{context} retry {attempt+1}/{self.config.retries} "
+                logger.warning(
+                    f"{context} attempt {attempt+1}/{self.config.retries} "
                     f"failed: {safe_msg}"
                 )
                 time.sleep(2**attempt)
