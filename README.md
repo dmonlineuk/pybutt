@@ -12,6 +12,13 @@
 - **Manifest-Based Import**: Track exported files with automatic manifests
 - **Performance Optimized**: Multi-process export and multi-threaded import for maximum throughput
 
+## Documentation
+
+In-depth guides on the data pipeline, memory behaviour, tuning knobs, engine
+differences, and defaults live in [`docs/`](docs/README.md). Start with
+[concepts](docs/concepts.md), then [tuning](docs/tuning.md),
+[engines](docs/engines.md), and [defaults](docs/defaults.md).
+
 ## Prerequisites
 
 Before installing PyButt, ensure your system has the required ODBC components:
@@ -738,8 +745,14 @@ pybutt import \
 - Ensure the table exists and contains data
 
 **Memory Issues:**
-- Reduce `--worker-count` or `--batch-size`
-- Process smaller tables first to verify setup
+- Reduce `--worker-count` — it multiplies per-worker memory in both directions.
+- Export: lower `--rowgroup-size`. The writer buffers a whole rowgroup in memory,
+  so this (not `--fetch-size`) drives export memory.
+- Import: peak memory is one Parquet rowgroup (pyodbc/mssql-python) or the whole
+  file (duckdb engine) — not `--batch-size`. Re-export with a smaller
+  `--rowgroup-size`, or avoid the duckdb engine for very large files.
+- Process smaller tables first to verify setup.
+- See [docs/concepts.md](docs/concepts.md) for the full memory model.
 
 **Frequent Batch/Rowgroup Failures:**
 - Increase `--retries` and `--batch-size` for more resilient imports
