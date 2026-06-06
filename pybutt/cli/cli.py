@@ -247,6 +247,12 @@ def export(
         help="Export engine to use: duckdb, pyodbc, or mssql-python.",
         case_sensitive=False,
     ),
+    mem_heartbeat: float = typer.Option(  # noqa: B008
+        0,
+        "--mem-heartbeat",
+        help="Log process memory (RSS) every N seconds. 0 disables (default).",
+        min=0,
+    ),
     verbose: bool = typer.Option(  # noqa: B008
         False,
         "--verbose",
@@ -288,6 +294,7 @@ def export(
         engine=engine.lower(),
         manifest_filename=manifest_filename,
         parameters=parameters,
+        mem_heartbeat=mem_heartbeat,
     )
     exporter.perform_work()
     typer.secho("Export completed successfully.", fg=typer.colors.GREEN)
@@ -431,6 +438,12 @@ def import_data(
             "heap behaviour. Enabled by default."
         ),
     ),
+    mem_heartbeat: float = typer.Option(  # noqa: B008
+        0,
+        "--mem-heartbeat",
+        help="Log process memory (RSS) every N seconds. 0 disables (default).",
+        min=0,
+    ),
 ) -> None:
     """Import Parquet files into a SQL Server table.
 
@@ -465,6 +478,7 @@ def import_data(
         temp_manifest_filename=temp_manifest_filename,
         delete_files=delete_files,
         create_cci=cci,
+        mem_heartbeat=mem_heartbeat,
     )
     importer.perform_work()
     typer.secho("Import completed successfully.", fg=typer.colors.GREEN)

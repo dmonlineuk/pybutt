@@ -1,4 +1,4 @@
-"""Tests for the centralised logging/observability helpers (Phase 1).
+"""Tests for the centralised logging/observability helpers (Phases 1 & 2).
 
 Covers:
 - ``context`` structured key=value rendering (and None skipping)
@@ -7,9 +7,12 @@ Covers:
 - ``MemoryError`` is logged and re-raised (never retried) in ``base.retry``
   and the importer batch/rowgroup retry helpers
 - worker-failure surfacing names the failing unit before re-raising
+- memory observability: ``_human_bytes`` formatting, ``rss_bytes`` peak
+  tracking, ``mem_fields`` shape, and ``MemoryHeartbeat`` lifecycle
 """
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
@@ -19,10 +22,14 @@ from pybutt.core.base import SqlServerIOBase
 from pybutt.core.config import SqlConfig, TransactionMode
 from pybutt.core.logobs import (
     LOGGER_NAME,
+    MemoryHeartbeat,
+    _human_bytes,
     configure_logging,
     context,
     get_logger,
     init_worker_logging,
+    mem_fields,
+    rss_bytes,
 )
 from pybutt.io.importer import Importer
 
@@ -212,3 +219,71 @@ def test_await_futures_logs_failing_unit(tmp_path, mock_config, caplog):
         "Worker failed" in m and "file=dbo_Posts_part_00000.parquet" in m
         for m in messages
     )
+
+
+# --- memory observability (Phase 2) ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    "num,expected",
+    [
+        (0, "0B"),
+        (900, "900B"),
+        (1024, "1.0KB"),
+        (1536, "1.5KB"),
+        (1024 * 1024, "1.0MB"),
+        (int(1.8 * 1024**3), "1.8GB"),
+        (5 * 1024**4, "5120.0GB"),  # no TB unit; GB is the cap
+    ],
+)
+def test_human_bytes(num, expected):
+    assert _human_bytes(num) == expected
+
+
+def test_rss_bytes_is_positive_and_tracks_peak():
+    first = rss_bytes()
+    assert first > 0
+    # Allocate ~40MB; peak must not decrease and current should be observable.
+    blob = bytearray(40 * 1024 * 1024)
+    second = rss_bytes()
+    assert second >= first
+    del blob
+    fields = mem_fields()
+    assert set(fields) == {"rss", "peak"}
+    assert fields["rss"].endswith(("B", "KB", "MB", "GB"))
+    assert fields["peak"].endswith(("B", "KB", "MB", "GB"))
+
+
+def test_memory_heartbeat_disabled_starts_no_thread():
+    hb = MemoryHeartbeat(0, unit="import")
+    with hb:
+        time.sleep(0.05)
+    assert hb._thread is None
+
+
+def test_memory_heartbeat_emits_and_stops(caplog):
+    pybutt_logger = logging.getLogger(LOGGER_NAME)
+    pybutt_logger.addHandler(caplog.handler)
+    pybutt_logger.setLevel(logging.INFO)
+
+    hb = MemoryHeartbeat(0.05, unit="import")
+    with hb:
+        time.sleep(0.2)
+    # Thread is stopped/joined on exit.
+    assert hb._thread is not None
+    assert not hb._thread.is_alive()
+
+    heartbeats = [r.message for r in caplog.records if "Memory heartbeat" in r.message]
+    assert heartbeats, "expected at least one heartbeat line"
+    assert "unit=import" in heartbeats[0]
+    assert "rss=" in heartbeats[0] and "peak=" in heartbeats[0]
+
+
+def test_importer_accepts_mem_heartbeat(tmp_path, mock_config):
+    importer = Importer(
+        config=mock_config,
+        input_path=tmp_path,
+        manifest_filename="manifest.json",
+        mem_heartbeat=1.5,
+    )
+    assert importer.mem_heartbeat == 1.5

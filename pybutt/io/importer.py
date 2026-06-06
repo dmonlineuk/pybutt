@@ -15,7 +15,12 @@ from pybutt.core.config import (
     quote_identifier,
     resolve_engine_default,
 )
-from pybutt.core.logobs import context, get_logger
+from pybutt.core.logobs import (
+    MemoryHeartbeat,
+    context,
+    get_logger,
+    mem_fields,
+)
 from pybutt.exceptions import (
     BatchImportError,
     EngineSelectionError,
@@ -46,6 +51,7 @@ class Importer(SqlServerIOBase):
         temp_manifest_filename: str | None = None,
         delete_files: bool = False,
         create_cci: bool = True,
+        mem_heartbeat: float = 0,
     ):
         super().__init__(config)
 
@@ -77,6 +83,7 @@ class Importer(SqlServerIOBase):
         )
         self.delete_files = delete_files
         self.create_cci = create_cci
+        self.mem_heartbeat = mem_heartbeat
 
     def load_manifest(self):
         manifest_file = self.input_path / self.manifest_filename
@@ -144,6 +151,7 @@ class Importer(SqlServerIOBase):
                 engine=self.engine,
                 batch_size=self.batch_size,
                 transaction_mode=self.transaction_mode.value,
+                **mem_fields(),
             )
         )
 
@@ -252,7 +260,11 @@ class Importer(SqlServerIOBase):
                         if self.transaction_mode != TransactionMode.BATCH:
                             logger.debug(
                                 "Processed row group "
-                                + context(file=filename, rg=f"{rg_idx + 1}/{total_rg}")
+                                + context(
+                                    file=filename,
+                                    rg=f"{rg_idx + 1}/{total_rg}",
+                                    **mem_fields(),
+                                )
                             )
 
                 # Commit after entire file if in FILE mode
@@ -265,6 +277,7 @@ class Importer(SqlServerIOBase):
                         file=filename,
                         rows=total_rows,
                         seconds=f"{time.time() - start:.2f}",
+                        **mem_fields(),
                     )
                 )
 
@@ -338,6 +351,7 @@ class Importer(SqlServerIOBase):
                         file=filename,
                         rows=total_rows,
                         seconds=f"{time.time() - start:.2f}",
+                        **mem_fields(),
                     )
                 )
 
@@ -384,7 +398,11 @@ class Importer(SqlServerIOBase):
                     total_rows += rows_in_rg
                     logger.debug(
                         "Processed row group "
-                        + context(file=filename, rg=f"{rg_idx + 1}/{total_rg}")
+                        + context(
+                            file=filename,
+                            rg=f"{rg_idx + 1}/{total_rg}",
+                            **mem_fields(),
+                        )
                     )
             else:
                 for rg_idx in range(total_rg):
@@ -428,6 +446,7 @@ class Importer(SqlServerIOBase):
                     file=filename,
                     rows=total_rows,
                     seconds=f"{time.time() - start:.2f}",
+                    **mem_fields(),
                 )
             )
         finally:
@@ -702,6 +721,12 @@ class Importer(SqlServerIOBase):
             manifest_path.unlink()
 
     def perform_work(self):
+        # Import runs in a single process (worker threads share its memory), so
+        # one heartbeat here reports the whole run's RSS trend.
+        with MemoryHeartbeat(self.mem_heartbeat, unit="import"):
+            self._perform_work()
+
+    def _perform_work(self):
         filenames = self.load_manifest_entries()
 
         if self.worker_count > 1 and len(filenames) > 1:
