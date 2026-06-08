@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from pybutt.exceptions import InvalidIdentifierError
+from pybutt.exceptions import InvalidIdentifierError, InvalidParameterError
 
 ENGINE_CHOICES = frozenset({"duckdb", "pyodbc", "mssql-python"})
 
@@ -39,6 +39,33 @@ class TransactionMode(StrEnum):
 
 IDENTIFIER_REGEX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+# TVF parameters must be a comma-separated list of literals:
+# integers/decimals, single-quoted strings (no nested quotes), NULLs.
+_PARAM_TOKEN_RE = re.compile(
+    r"\s*(?:"
+    r"NULL"
+    r"|[+-]?\d+(?:\.\d+)?"
+    r"|'[^']*'"
+    r")\s*",
+    re.IGNORECASE,
+)
+
+
+def validate_parameters(params: str) -> str:
+    """Reject parameter strings that could contain SQL injection payloads.
+
+    Accepts only comma-separated SQL literals: numbers, single-quoted
+    strings (no embedded quotes), and NULL.
+    """
+    tokens = params.split(",")
+    for token in tokens:
+        if not _PARAM_TOKEN_RE.fullmatch(token):
+            raise InvalidParameterError(
+                f"Unsafe TVF parameter token: {token.strip()!r}. "
+                "Only numeric literals, single-quoted strings, and NULL are allowed."
+            )
+    return params
+
 
 def validate_identifier(name: str) -> str:
     if not IDENTIFIER_REGEX.match(name):
@@ -48,6 +75,20 @@ def validate_identifier(name: str) -> str:
 
 def quote_identifier(name: str) -> str:
     return f"[{name.replace(']', ']]')}]"
+
+
+def sanitise_dsn_value(value: str) -> str:
+    """Escape ODBC connection-string metacharacters in a value.
+
+    Braces and semicolons are special in ODBC DSN strings. If the value
+    contains any of them, wrap it in ``{…}`` (doubling any literal
+    ``}`` inside) so the driver interprets the whole token as one value.
+    """
+    if not value:
+        return value
+    if any(ch in value for ch in (";", "{", "}", "=")):
+        return "{" + value.replace("}", "}}") + "}"
+    return value
 
 
 @dataclass

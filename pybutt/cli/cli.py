@@ -6,7 +6,6 @@ import tomllib
 from pathlib import Path
 
 import typer
-from typer.testing import CliRunner
 
 from pybutt.core.config import (
     SqlConfig,
@@ -22,9 +21,6 @@ from pybutt.files.files import (
 from pybutt.io.exporter import Exporter
 from pybutt.io.importer import Importer
 from pybutt.io.merger import TableMerger
-
-runner = CliRunner()
-
 
 app = typer.Typer(
     context_settings={"help_option_names": ["-?", "--help"]},
