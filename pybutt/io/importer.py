@@ -103,11 +103,7 @@ class Importer(SqlServerIOBase):
     def _validate_and_build_insert(
         self, cur, columns, filename, target_table: str | None = None
     ):
-        try:
-            table_columns = self.get_table_columns(cur, target_table=target_table)
-        except TypeError:
-            table_columns = self.get_table_columns(cur)
-
+        table_columns = self.get_table_columns(cur, target_table=target_table)
         self.validate_schema(columns, table_columns, filename)
         return self._build_insert_sql(columns, target_table=target_table)
 
@@ -511,7 +507,7 @@ class Importer(SqlServerIOBase):
                         f"Bulk copy failed after {self.config.retries} retries "
                         + context(file=filename, rg=rg, batch=batch, offset=offset)
                         + f": {safe_msg}"
-                    ) from None
+                    ) from e
 
     def _rows_from_arrow_table(self, table):
         """Convert a PyArrow table to a list of tuples for bulkcopy."""
@@ -569,7 +565,7 @@ class Importer(SqlServerIOBase):
                         f"Batch import failed after {self.config.retries} retries "
                         + context(file=filename, rg=rg, batch=batch, offset=offset)
                         + f": {safe_msg}"
-                    ) from None
+                    ) from e
 
     def _import_rowgroup_with_retry(
         self, c, cur, table_or_batch, insert_sql, filename, rg_idx, total_rg
@@ -615,7 +611,7 @@ class Importer(SqlServerIOBase):
                         f"Row group import failed after {self.config.retries} retries "
                         + context(file=filename, rg=rg)
                         + f": {safe_msg}"
-                    ) from None
+                    ) from e
 
     def _make_temp_table_name(self, worker_index: int) -> str:
         suffix = uuid.uuid4().hex[:8]
@@ -735,11 +731,14 @@ class Importer(SqlServerIOBase):
             self._delete_original_files(filenames)
 
     def _await_futures(self, futures, label):
-        """Wait for worker futures, surfacing which unit failed before re-raising.
+        """Wait for worker futures, surfacing *all* failures before re-raising.
 
         Without this, a worker exception only re-raises as a bare traceback with
-        no indication of *which* file/table the dead worker was handling.
+        no indication of *which* file/table the dead worker was handling.  We now
+        wait for every future so errors from all workers are logged, then raise
+        the first failure.
         """
+        first_error: Exception | None = None
         for future in as_completed(futures):
             unit = futures[future]
             try:
@@ -750,7 +749,10 @@ class Importer(SqlServerIOBase):
                     + context(**{label: unit})
                     + f": {self.safe_error_message(e)}"
                 )
-                raise
+                if first_error is None:
+                    first_error = e
+        if first_error is not None:
+            raise first_error
 
 
 if __name__ == "__main__":

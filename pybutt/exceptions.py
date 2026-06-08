@@ -14,6 +14,10 @@ class InvalidIdentifierError(ConfigurationError):
     """Raised when a SQL identifier is invalid."""
 
 
+class InvalidParameterError(ConfigurationError):
+    """Raised when a TVF parameter string contains unsafe content."""
+
+
 class ManifestError(PyButtError, ValueError):
     """Base class for manifest validation errors."""
 
@@ -44,6 +48,10 @@ class UnsupportedManifestTypeError(InvalidManifestError):
 
 class MissingManifestEntryError(FileNotFoundError, InvalidManifestError):
     """Raised when a manifest references a missing Parquet file."""
+
+
+class PathTraversalError(InvalidManifestError):
+    """Raised when a manifest entry resolves outside its base directory."""
 
 
 class SchemaMismatchError(PyButtError, ValueError):

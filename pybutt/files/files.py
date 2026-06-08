@@ -11,6 +11,7 @@ from pybutt.exceptions import (
     InvalidManifestError,
     ManifestNotFoundError,
     MissingManifestEntryError,
+    PathTraversalError,
     UnsupportedManifestTypeError,
     UnsupportedManifestVersionError,
 )
@@ -148,7 +149,11 @@ def validate_manifest_entries(manifest: dict, base_dir: Path) -> list[str]:
             raise DuplicateManifestEntryError(f"Duplicate file in manifest: {item}")
 
         if manifest["type"] == "files":
-            filepath = base_dir / item
+            filepath = (base_dir / item).resolve()
+            if not filepath.is_relative_to(base_dir.resolve()):
+                raise PathTraversalError(
+                    f"Manifest entry escapes base directory: {item}"
+                )
             if not filepath.exists():
                 raise MissingManifestEntryError(f"Missing file: {filepath}")
 
