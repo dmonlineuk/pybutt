@@ -305,6 +305,8 @@ class Exporter(SqlServerIOBase):
                 result = c.execute(f"FROM odbc_query('{self.dsn}', $$ {query} $$)")
                 reader = result.arrow()
                 self._write_parquet_from_record_batches(reader, filepath, filename)
+            except DataExportError:
+                raise
             except Exception as e:
                 raise DataExportError(
                     f"Failed exporting {filename}: {self.safe_error_message(e)}"
@@ -612,6 +614,7 @@ class Exporter(SqlServerIOBase):
                 + context(file=manifest_file)
                 + f": {self.safe_error_message(e)}"
             )
+            raise
 
 
 if __name__ == "__main__":

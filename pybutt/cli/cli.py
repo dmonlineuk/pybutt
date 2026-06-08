@@ -13,6 +13,7 @@ from pybutt.core.config import (
     TransactionMode,
 )
 from pybutt.core.logobs import configure_logging
+from pybutt.exceptions import PyButtError
 from pybutt.files.files import (
     inspect_manifest,
     load_manifest,
@@ -282,21 +283,25 @@ def export(
         retries=retries,
     )
 
-    exporter = Exporter(
-        config=config,
-        output_path=output_path,
-        pk_column=pk_column,
-        columns=parse_columns(columns),
-        worker_count=worker_count,
-        file_count=file_count,
-        rowgroup_size=rowgroup_size,
-        fetch_size=fetch_size,
-        engine=engine.lower(),
-        manifest_filename=manifest_filename,
-        parameters=parameters,
-        mem_heartbeat=mem_heartbeat,
-    )
-    exporter.perform_work()
+    try:
+        exporter = Exporter(
+            config=config,
+            output_path=output_path,
+            pk_column=pk_column,
+            columns=parse_columns(columns),
+            worker_count=worker_count,
+            file_count=file_count,
+            rowgroup_size=rowgroup_size,
+            fetch_size=fetch_size,
+            engine=engine.lower(),
+            manifest_filename=manifest_filename,
+            parameters=parameters,
+            mem_heartbeat=mem_heartbeat,
+        )
+        exporter.perform_work()
+    except PyButtError as exc:
+        typer.secho(f"Export failed: {exc}", fg=typer.colors.RED, err=True)
+        raise SystemExit(1) from exc
     typer.secho("Export completed successfully.", fg=typer.colors.GREEN)
 
 
@@ -467,20 +472,24 @@ def import_data(
         retries=retries,
     )
 
-    importer = Importer(
-        config=config,
-        input_path=input_path,
-        manifest_filename=manifest_filename,
-        worker_count=worker_count,
-        batch_size=batch_size,
-        transaction_mode=transaction_mode,
-        engine=engine.lower(),
-        temp_manifest_filename=temp_manifest_filename,
-        delete_files=delete_files,
-        create_cci=cci,
-        mem_heartbeat=mem_heartbeat,
-    )
-    importer.perform_work()
+    try:
+        importer = Importer(
+            config=config,
+            input_path=input_path,
+            manifest_filename=manifest_filename,
+            worker_count=worker_count,
+            batch_size=batch_size,
+            transaction_mode=transaction_mode,
+            engine=engine.lower(),
+            temp_manifest_filename=temp_manifest_filename,
+            delete_files=delete_files,
+            create_cci=cci,
+            mem_heartbeat=mem_heartbeat,
+        )
+        importer.perform_work()
+    except PyButtError as exc:
+        typer.secho(f"Import failed: {exc}", fg=typer.colors.RED, err=True)
+        raise SystemExit(1) from exc
     typer.secho("Import completed successfully.", fg=typer.colors.GREEN)
 
 
@@ -544,18 +553,26 @@ def merge(
 
     configure_logging(verbose)
 
-    manifest = load_manifest(manifest_path)
+    try:
+        manifest = load_manifest(manifest_path)
+    except PyButtError as exc:
+        typer.secho(f"Merge failed: {exc}", fg=typer.colors.RED, err=True)
+        raise SystemExit(1) from exc
 
     if manifest["type"] == "files":
         if output_file is None:
             raise typer.BadParameter("--output-file is required for file manifests")
 
-        merge_parquet_files(
-            manifest_path,
-            output_file,
-            rowgroup_size,
-            delete_originals=delete_files,
-        )
+        try:
+            merge_parquet_files(
+                manifest_path,
+                output_file,
+                rowgroup_size,
+                delete_originals=delete_files,
+            )
+        except PyButtError as exc:
+            typer.secho(f"Merge failed: {exc}", fg=typer.colors.RED, err=True)
+            raise SystemExit(1) from exc
         typer.secho("File merge completed successfully.", fg=typer.colors.GREEN)
         return
 
@@ -581,8 +598,12 @@ def merge(
             retries=retries,
         )
 
-        merger = TableMerger(config=config, sources=manifest["entries"])
-        merger.merge(target_schema=schema, target_table=table)
+        try:
+            merger = TableMerger(config=config, sources=manifest["entries"])
+            merger.merge(target_schema=schema, target_table=table)
+        except PyButtError as exc:
+            typer.secho(f"Merge failed: {exc}", fg=typer.colors.RED, err=True)
+            raise SystemExit(1) from exc
 
         # Write a manifest for the merged table
         new_manifest_name = f"{manifest_path.stem}_merged{manifest_path.suffix}"
