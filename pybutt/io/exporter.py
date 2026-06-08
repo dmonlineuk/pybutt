@@ -15,6 +15,7 @@ from pybutt.core.config import (
     quote_identifier,
     resolve_engine_default,
     validate_identifier,
+    validate_parameters,
 )
 from pybutt.core.logobs import (
     MemoryHeartbeat,
@@ -59,7 +60,7 @@ class Exporter(SqlServerIOBase):
 
         self.pk_column = validate_identifier(pk_column) if pk_column else None
         self.columns = [validate_identifier(c) for c in columns] if columns else None
-        self.parameters = parameters
+        self.parameters = validate_parameters(parameters) if parameters else None
 
         if engine not in ENGINE_CHOICES:
             raise EngineSelectionError(

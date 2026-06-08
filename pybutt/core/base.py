@@ -10,6 +10,7 @@ from pybutt.exceptions import ConfigurationError, RetryExceededError
 from .config import (
     SqlConfig,
     quote_identifier,
+    sanitise_dsn_value,
     validate_identifier,
 )
 from .logobs import get_logger
@@ -31,8 +32,8 @@ class SqlServerIOBase:
 
         parts = [
             f"Driver={{{cfg.driver}}}",
-            f"Server={cfg.server}",
-            f"Database={cfg.database}",
+            f"Server={sanitise_dsn_value(cfg.server)}",
+            f"Database={sanitise_dsn_value(cfg.database)}",
         ]
 
         if cfg.trusted_connection:
@@ -42,8 +43,8 @@ class SqlServerIOBase:
                 raise ConfigurationError(
                     "Username/password required when not using trusted connection"
                 )
-            parts.append(f"Uid={cfg.username}")
-            parts.append(f"Pwd={cfg.password}")
+            parts.append(f"Uid={sanitise_dsn_value(cfg.username)}")
+            parts.append(f"Pwd={sanitise_dsn_value(cfg.password)}")
 
         parts.append(f"TrustServerCertificate={'Yes' if cfg.trust_cert else 'No'}")
 

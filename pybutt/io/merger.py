@@ -1,7 +1,12 @@
 from collections.abc import Iterable
 
 from pybutt.core.base import SqlServerIOBase
-from pybutt.core.config import ENGINE_CHOICES, TransactionMode
+from pybutt.core.config import (
+    ENGINE_CHOICES,
+    TransactionMode,
+    quote_identifier,
+    validate_identifier,
+)
 from pybutt.core.logobs import context, get_logger
 from pybutt.exceptions import (
     EngineSelectionError,
@@ -41,7 +46,10 @@ class TableMerger(SqlServerIOBase):
         parts = fq.split(".")
         if len(parts) != 2:
             raise ValueError(f"Invalid source table name: {fq}")
-        return parts[0], parts[1]
+        schema, table = parts
+        validate_identifier(schema)
+        validate_identifier(table)
+        return schema, table
 
     def _ensure_target_exists_and_schema(
         self, cur, first_source: str, target_schema: str, target_table: str
@@ -53,21 +61,23 @@ class TableMerger(SqlServerIOBase):
 
         # Get column list for source
         src_schema, src_table = self._parse_schema_table(first_source)
-        cur.execute(f"SELECT TOP 0 * FROM {src_schema}.{src_table}")
+        q_src = f"{quote_identifier(src_schema)}.{quote_identifier(src_table)}"
+        q_tgt = f"{quote_identifier(target_schema)}.{quote_identifier(target_table)}"
+        cur.execute(f"SELECT TOP 0 * FROM {q_src}")
         src_cols = [c[0] for c in cur.description]
 
         if not exists:
             # Create target table with same schema as source
             cur.execute(
                 "SELECT TOP 0 * "
-                f"INTO {target_schema}.{target_table} "
-                f"FROM {src_schema}.{src_table}"
+                f"INTO {q_tgt} "
+                f"FROM {q_src}"
             )
             cur.connection.commit()
             return src_cols
 
         # Target exists: get target columns
-        cur.execute(f"SELECT TOP 0 * FROM {target_schema}.{target_table}")
+        cur.execute(f"SELECT TOP 0 * FROM {q_tgt}")
         tgt_cols = [c[0] for c in cur.description]
 
         if set(src_cols) != set(tgt_cols):
@@ -93,8 +103,16 @@ class TableMerger(SqlServerIOBase):
                 )
 
                 # Insert from each source
+                q_tgt = (
+                    f"{quote_identifier(target_schema)}"
+                    f".{quote_identifier(target_table)}"
+                )
                 for src in self.sources:
                     src_schema, src_table = self._parse_schema_table(src)
+                    q_src = (
+                        f"{quote_identifier(src_schema)}"
+                        f".{quote_identifier(src_table)}"
+                    )
                     logger.info(
                         "Merging "
                         + context(
@@ -104,8 +122,8 @@ class TableMerger(SqlServerIOBase):
                     )
                     try:
                         cur.execute(
-                            f"INSERT INTO {target_schema}.{target_table} "
-                            f"SELECT * FROM {src_schema}.{src_table}"
+                            f"INSERT INTO {q_tgt} "
+                            f"SELECT * FROM {q_src}"
                         )
                         conn.commit()
                     except Exception:
