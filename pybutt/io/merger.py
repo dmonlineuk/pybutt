@@ -2,16 +2,14 @@ from collections.abc import Iterable
 
 from pybutt.core.base import SqlServerIOBase
 from pybutt.core.config import (
-    ENGINE_CHOICES,
     TransactionMode,
+    coerce_transaction_mode,
     quote_identifier,
+    validate_engine,
     validate_identifier,
 )
 from pybutt.core.logobs import context, get_logger
-from pybutt.exceptions import (
-    EngineSelectionError,
-    SchemaMismatchError,
-)
+from pybutt.exceptions import SchemaMismatchError
 
 logger = get_logger("merger")
 
@@ -31,15 +29,8 @@ class TableMerger(SqlServerIOBase):
     ):
         super().__init__(config)
         self.sources: list[str] = list(sources)
-        self.transaction_mode = (
-            TransactionMode(transaction_mode)
-            if isinstance(transaction_mode, str)
-            else transaction_mode
-        )
-        if engine not in ("pyodbc", "duckdb"):
-            raise EngineSelectionError(
-                f"engine must be one of {sorted(ENGINE_CHOICES)}"
-            )
+        self.transaction_mode = coerce_transaction_mode(transaction_mode)
+        validate_engine(engine, allowed=frozenset({"pyodbc", "duckdb"}))
         self.engine = engine
 
     def _parse_schema_table(self, fq: str) -> tuple[str, str]:
@@ -68,11 +59,7 @@ class TableMerger(SqlServerIOBase):
 
         if not exists:
             # Create target table with same schema as source
-            cur.execute(
-                "SELECT TOP 0 * "
-                f"INTO {q_tgt} "
-                f"FROM {q_src}"
-            )
+            cur.execute(f"SELECT TOP 0 * INTO {q_tgt} FROM {q_src}")
             cur.connection.commit()
             return src_cols
 
@@ -110,8 +97,7 @@ class TableMerger(SqlServerIOBase):
                 for src in self.sources:
                     src_schema, src_table = self._parse_schema_table(src)
                     q_src = (
-                        f"{quote_identifier(src_schema)}"
-                        f".{quote_identifier(src_table)}"
+                        f"{quote_identifier(src_schema)}.{quote_identifier(src_table)}"
                     )
                     logger.info(
                         "Merging "
@@ -121,10 +107,7 @@ class TableMerger(SqlServerIOBase):
                         )
                     )
                     try:
-                        cur.execute(
-                            f"INSERT INTO {q_tgt} "
-                            f"SELECT * FROM {q_src}"
-                        )
+                        cur.execute(f"INSERT INTO {q_tgt} SELECT * FROM {q_src}")
                         conn.commit()
                     except Exception:
                         conn.rollback()

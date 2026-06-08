@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import getpass
-import json
 import tomllib
 from pathlib import Path
 
@@ -18,6 +17,7 @@ from pybutt.files.files import (
     load_manifest,
     merge_parquet_files,
     rewrite_parquet_files,
+    write_manifest,
 )
 from pybutt.io.exporter import Exporter
 from pybutt.io.importer import Importer
@@ -520,21 +520,13 @@ def merge(
         1_048_576, "--rowgroup-size", "-R", help="Rowgroup size for output."
     ),
     # SQL merge options (target)
-    server: str | None = typer.Option(
-        None, "--server", "-s", help="SQL Server host."
-    ),  # noqa: B008
+    server: str | None = typer.Option(None, "--server", "-s", help="SQL Server host."),  # noqa: B008
     database: str | None = typer.Option(  # noqa: B008
         None, "--database", "-d", help="Target database."
     ),
-    schema: str | None = typer.Option(
-        None, "--schema", "-S", help="Target schema."
-    ),  # noqa: B008
-    table: str | None = typer.Option(
-        None, "--table", "-t", help="Target table."
-    ),  # noqa: B008
-    trusted_connection: bool = typer.Option(
-        False, "--trusted-connection", "-T"
-    ),  # noqa: B008
+    schema: str | None = typer.Option(None, "--schema", "-S", help="Target schema."),  # noqa: B008
+    table: str | None = typer.Option(None, "--table", "-t", help="Target table."),  # noqa: B008
+    trusted_connection: bool = typer.Option(False, "--trusted-connection", "-T"),  # noqa: B008
     username: str | None = typer.Option(None, "--username", "-u"),  # noqa: B008
     password: str | None = typer.Option(None, "--password", "-p"),  # noqa: B008
     driver: str = typer.Option(  # noqa: B008
@@ -601,19 +593,12 @@ def merge(
             typer.secho(f"Merge failed: {exc}", fg=typer.colors.RED, err=True)
             raise SystemExit(1) from exc
 
-        # Write a manifest for the merged table
         new_manifest_name = f"{manifest_path.stem}_merged{manifest_path.suffix}"
-        new_manifest_path = manifest_path.parent / new_manifest_name
-        with open(new_manifest_path, "w") as f:
-            json.dump(
-                {
-                    "version": 2,
-                    "type": "tables",
-                    "entries": [f"{schema}.{table}"],
-                },
-                f,
-                indent=4,
-            )
+        write_manifest(
+            manifest_path.parent / new_manifest_name,
+            [f"{schema}.{table}"],
+            manifest_type="tables",
+        )
 
         if delete_files and manifest_path.exists():
             manifest_path.unlink()
@@ -626,9 +611,7 @@ def merge(
 @app.command("inspect")
 def inspect_command(
     manifest: Path = typer.Argument(..., help="Path to manifest.json"),  # noqa: B008
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Show column details"
-    ),  # noqa: B008
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show column details"),  # noqa: B008
 ):
     """
     Inspect parquet files listed in a manifest.

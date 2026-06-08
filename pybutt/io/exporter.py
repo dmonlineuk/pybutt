@@ -1,4 +1,3 @@
-import json as j
 import math as m
 import time
 from multiprocessing import get_context
@@ -10,10 +9,10 @@ import pyodbc
 
 from pybutt.core.base import SqlServerIOBase
 from pybutt.core.config import (
-    ENGINE_CHOICES,
     SqlConfig,
     quote_identifier,
     resolve_engine_default,
+    validate_engine,
     validate_identifier,
     validate_parameters,
 )
@@ -27,12 +26,11 @@ from pybutt.core.logobs import (
 from pybutt.exceptions import (
     ConfigurationError,
     DataExportError,
-    EngineSelectionError,
     TableEmptyError,
 )
 from pybutt.files.files import (
-    MANIFEST_VERSION_2,
     default_manifest_filename,
+    write_manifest,
 )
 
 logger = get_logger("exporter")
@@ -62,10 +60,7 @@ class Exporter(SqlServerIOBase):
         self.columns = [validate_identifier(c) for c in columns] if columns else None
         self.parameters = validate_parameters(parameters) if parameters else None
 
-        if engine not in ENGINE_CHOICES:
-            raise EngineSelectionError(
-                f"engine must be one of {sorted(ENGINE_CHOICES)}"
-            )
+        validate_engine(engine)
 
         if file_count < 1:
             raise ConfigurationError("file_count must be at least 1")
@@ -313,91 +308,79 @@ class Exporter(SqlServerIOBase):
                     f"Failed exporting {filename}: {self.safe_error_message(e)}"
                 ) from e
 
+    def _export_cursor_to_parquet(self, cur, filepath, filename):
+        """Shared fetch-buffer-write logic for cursor-based engines (pyodbc / mssql)."""
+        if cur.description is None:
+            raise DataExportError(
+                f"Failed exporting {filename}: query returned no column metadata"
+            )
+
+        columns = [desc[0] for desc in cur.description]
+        fetch_size = self.fetch_size
+
+        first_rows = cur.fetchmany(fetch_size)
+        if not first_rows:
+            empty_schema = pa.schema([pa.field(c, pa.string()) for c in columns])
+            with pq.ParquetWriter(
+                str(filepath.as_posix()), empty_schema, compression="snappy"
+            ) as writer:
+                writer.write_table(
+                    pa.Table.from_pydict({c: [] for c in columns}, schema=empty_schema)
+                )
+            return
+
+        batch_dicts = [dict(zip(columns, row, strict=True)) for row in first_rows]
+        target_schema = pa.Table.from_pylist(batch_dicts).schema
+
+        def _rows_to_table(rows_to_write):
+            batch = [dict(zip(columns, row, strict=True)) for row in rows_to_write]
+            tbl = pa.Table.from_pylist(batch)
+            if tbl.schema != target_schema:
+                arrays = []
+                for field in target_schema:
+                    name = field.name
+                    col_type = field.type
+                    vals = [r.get(name) for r in batch]
+                    arrays.append(pa.array(vals, type=col_type))
+                tbl = pa.Table.from_arrays(
+                    arrays, names=[f.name for f in target_schema]
+                )
+            return tbl
+
+        with pq.ParquetWriter(
+            str(filepath.as_posix()), target_schema, compression="snappy"
+        ) as writer:
+            buffered_rows = list(first_rows)
+
+            while True:
+                if len(buffered_rows) >= self.rowgroup_size:
+                    rows_to_write = buffered_rows[: self.rowgroup_size]
+                    writer.write_table(
+                        _rows_to_table(rows_to_write),
+                        row_group_size=self.rowgroup_size,
+                    )
+                    buffered_rows = buffered_rows[self.rowgroup_size :]
+                    continue
+
+                rows = cur.fetchmany(fetch_size)
+                if not rows:
+                    break
+                buffered_rows.extend(rows)
+
+            if buffered_rows:
+                writer.write_table(
+                    _rows_to_table(buffered_rows),
+                    row_group_size=self.rowgroup_size,
+                )
+
     def _export_partition_with_pyodbc(self, query, filepath, filename):
         with self.connection_p() as conn:
             with conn.cursor() as cur:
                 try:
                     cur.execute(query)
-                except Exception as e:
-                    raise DataExportError(
-                        f"Failed exporting {filename}: {self.safe_error_message(e)}"
-                    ) from e
-
-                if cur.description is None:
-                    raise DataExportError(
-                        f"Failed exporting {filename}: query returned no column "
-                        "metadata"
-                    )
-
-                columns = [desc[0] for desc in cur.description]
-                fetch_size = self.fetch_size
-
-                # Read first non-empty batch to infer a stable schema
-                try:
-                    first_rows = cur.fetchmany(fetch_size)
-                    if not first_rows:
-                        # No rows: create an empty file with string columns
-                        empty_schema = pa.schema(
-                            [pa.field(c, pa.string()) for c in columns]
-                        )
-                        with pq.ParquetWriter(
-                            str(filepath.as_posix()), empty_schema, compression="snappy"
-                        ) as writer:
-                            writer.write_table(
-                                pa.Table.from_pydict(
-                                    {c: [] for c in columns}, schema=empty_schema
-                                )
-                            )
-                        return
-
-                    batch_dicts = [
-                        dict(zip(columns, row, strict=True)) for row in first_rows
-                    ]
-                    target_schema = pa.Table.from_pylist(batch_dicts).schema
-
-                    def _rows_to_table(rows_to_write):
-                        batch = [
-                            dict(zip(columns, row, strict=True))
-                            for row in rows_to_write
-                        ]
-                        tbl = pa.Table.from_pylist(batch)
-                        if tbl.schema != target_schema:
-                            arrays = []
-                            for field in target_schema:
-                                name = field.name
-                                col_type = field.type
-                                vals = [r.get(name) for r in batch]
-                                arrays.append(pa.array(vals, type=col_type))
-                            tbl = pa.Table.from_arrays(
-                                arrays, names=[f.name for f in target_schema]
-                            )
-                        return tbl
-
-                    with pq.ParquetWriter(
-                        str(filepath.as_posix()), target_schema, compression="snappy"
-                    ) as writer:
-                        buffered_rows = list(first_rows)
-
-                        while True:
-                            if len(buffered_rows) >= self.rowgroup_size:
-                                rows_to_write = buffered_rows[: self.rowgroup_size]
-                                writer.write_table(
-                                    _rows_to_table(rows_to_write),
-                                    row_group_size=self.rowgroup_size,
-                                )
-                                buffered_rows = buffered_rows[self.rowgroup_size :]
-                                continue
-
-                            rows = cur.fetchmany(fetch_size)
-                            if not rows:
-                                break
-                            buffered_rows.extend(rows)
-
-                        if buffered_rows:
-                            writer.write_table(
-                                _rows_to_table(buffered_rows),
-                                row_group_size=self.rowgroup_size,
-                            )
+                    self._export_cursor_to_parquet(cur, filepath, filename)
+                except DataExportError:
+                    raise
                 except Exception as e:
                     raise DataExportError(
                         f"Failed exporting {filename}: {self.safe_error_message(e)}"
@@ -409,78 +392,7 @@ class Exporter(SqlServerIOBase):
             cur = conn.cursor()
             try:
                 cur.execute(query)
-
-                if cur.description is None:
-                    raise DataExportError(
-                        f"Failed exporting {filename}: query returned no column "
-                        "metadata"
-                    )
-
-                columns = [desc[0] for desc in cur.description]
-                fetch_size = self.fetch_size
-
-                first_rows = cur.fetchmany(fetch_size)
-                if not first_rows:
-                    empty_schema = pa.schema(
-                        [pa.field(c, pa.string()) for c in columns]
-                    )
-                    with pq.ParquetWriter(
-                        str(filepath.as_posix()), empty_schema, compression="snappy"
-                    ) as writer:
-                        writer.write_table(
-                            pa.Table.from_pydict(
-                                {c: [] for c in columns}, schema=empty_schema
-                            )
-                        )
-                    return
-
-                batch_dicts = [
-                    dict(zip(columns, row, strict=True)) for row in first_rows
-                ]
-                target_schema = pa.Table.from_pylist(batch_dicts).schema
-
-                def _rows_to_table(rows_to_write):
-                    batch = [
-                        dict(zip(columns, row, strict=True)) for row in rows_to_write
-                    ]
-                    tbl = pa.Table.from_pylist(batch)
-                    if tbl.schema != target_schema:
-                        arrays = []
-                        for field in target_schema:
-                            name = field.name
-                            col_type = field.type
-                            vals = [r.get(name) for r in batch]
-                            arrays.append(pa.array(vals, type=col_type))
-                        tbl = pa.Table.from_arrays(
-                            arrays, names=[f.name for f in target_schema]
-                        )
-                    return tbl
-
-                with pq.ParquetWriter(
-                    str(filepath.as_posix()), target_schema, compression="snappy"
-                ) as writer:
-                    buffered_rows = list(first_rows)
-
-                    while True:
-                        if len(buffered_rows) >= self.rowgroup_size:
-                            rows_to_write = buffered_rows[: self.rowgroup_size]
-                            writer.write_table(
-                                _rows_to_table(rows_to_write),
-                                row_group_size=self.rowgroup_size,
-                            )
-                            buffered_rows = buffered_rows[self.rowgroup_size :]
-                            continue
-
-                        rows = cur.fetchmany(fetch_size)
-                        if not rows:
-                            break
-                        buffered_rows.extend(rows)
-
-                    if buffered_rows:
-                        writer.write_table(
-                            _rows_to_table(buffered_rows),
-                            row_group_size=self.rowgroup_size,
-                        )
+                self._export_cursor_to_parquet(cur, filepath, filename)
             except DataExportError:
                 raise
             except Exception as e:
@@ -595,16 +507,7 @@ class Exporter(SqlServerIOBase):
 
         logger.info("Writing manifest " + context(file=manifest_file))
         try:
-            with open(manifest_file, "w") as f:
-                j.dump(
-                    {
-                        "version": MANIFEST_VERSION_2,
-                        "type": "files",
-                        "entries": filenames,
-                    },
-                    f,
-                    indent=4,
-                )
+            write_manifest(manifest_file, filenames)
             logger.info(
                 "Manifest written " + context(file=manifest_file, files=len(filenames))
             )

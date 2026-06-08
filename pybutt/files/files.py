@@ -91,6 +91,35 @@ def default_rewrite_manifest_filename(manifest_path: Path) -> str:
     return f"{manifest_path.stem}_new{manifest_path.suffix}"
 
 
+def write_manifest(
+    path: str | Path,
+    entries: list[str],
+    manifest_type: str = "files",
+    version: int = MANIFEST_VERSION_2,
+) -> Path:
+    """Write a versioned manifest JSON file and return its :class:`Path`."""
+    path = Path(path)
+    with open(path, "w") as f:
+        json.dump(
+            {"version": version, "type": manifest_type, "entries": entries},
+            f,
+            indent=4,
+        )
+    return path
+
+
+def load_file_manifest(
+    manifest_path: str | Path, *, operation: str = "Operation"
+) -> dict:
+    """Load a manifest and raise if it is not a file manifest."""
+    manifest = load_manifest(manifest_path)
+    if manifest["type"] != "files":
+        raise UnsupportedManifestTypeError(
+            f"{operation} only supports file manifests, got: {manifest['type']}"
+        )
+    return manifest
+
+
 def load_manifest(manifest_path: str | Path) -> dict:
     manifest_path = Path(manifest_path)
 
@@ -157,11 +186,7 @@ def inspect_manifest(manifest_path: str | Path, verbose: bool = False):
     manifest_path = Path(manifest_path)
     base_dir = manifest_path.parent
 
-    manifest = load_manifest(manifest_path)
-    if manifest["type"] != "files":
-        raise UnsupportedManifestTypeError(
-            f"Inspect only supports file manifests, got: {manifest['type']}"
-        )
+    manifest = load_file_manifest(manifest_path, operation="Inspect")
 
     for filename in manifest["entries"]:
         filepath = base_dir / filename
@@ -197,7 +222,6 @@ def rewrite_single_file(
 
     # Create writer using the same schema
     with pq.ParquetWriter(dst_path, pf.schema_arrow, compression="snappy") as writer:
-
         for batch in pf.iter_batches(batch_size=new_rowgroup_size):
             table = pa.Table.from_batches([batch])
             writer.write_table(table)
@@ -222,11 +246,7 @@ def rewrite_parquet_files(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    manifest = load_manifest(manifest_path)
-    if manifest["type"] != "files":
-        raise UnsupportedManifestTypeError(
-            f"Rewrite only supports file manifests, got: {manifest['type']}"
-        )
+    manifest = load_file_manifest(manifest_path, operation="Rewrite")
 
     new_manifest_name = new_manifest_name or default_rewrite_manifest_filename(
         manifest_path
@@ -245,18 +265,7 @@ def rewrite_parquet_files(
         if delete_originals:
             src.unlink()
 
-    # Write new manifest
-    new_manifest_path = output_dir / new_manifest_name
-    with open(new_manifest_path, "w") as f:
-        json.dump(
-            {
-                "version": MANIFEST_VERSION_2,
-                "type": "files",
-                "entries": new_files,
-            },
-            f,
-            indent=4,
-        )
+    new_manifest_path = write_manifest(output_dir / new_manifest_name, new_files)
 
     if (
         delete_originals
@@ -299,11 +308,7 @@ def merge_parquet_files(
     manifest_path = Path(manifest_path)
     base_dir = manifest_path.parent
 
-    manifest = load_manifest(manifest_path)
-    if manifest["type"] != "files":
-        raise UnsupportedManifestTypeError(
-            f"Merge only supports file manifests, got: {manifest['type']}"
-        )
+    manifest = load_file_manifest(manifest_path, operation="Merge")
 
     entries = validate_manifest_entries(manifest, base_dir)
     if not entries:
@@ -346,21 +351,10 @@ def merge_parquet_files(
         if manifest_path.exists():
             manifest_path.unlink()
 
-    # Write a manifest for the merged output (single entry)
     new_manifest_name = (
         new_manifest_name or f"{manifest_path.stem}_merged{manifest_path.suffix}"
     )
-    new_manifest_path = base_dir / new_manifest_name
-    with open(new_manifest_path, "w") as f:
-        json.dump(
-            {
-                "version": MANIFEST_VERSION_2,
-                "type": "files",
-                "entries": [output_file.name],
-            },
-            f,
-            indent=4,
-        )
+    write_manifest(base_dir / new_manifest_name, [output_file.name])
 
     return output_file
 
