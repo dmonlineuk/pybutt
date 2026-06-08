@@ -29,6 +29,7 @@ from pybutt.exceptions import (
 from pybutt.files.files import (
     default_manifest_filename,
     default_temp_manifest_filename,
+    load_file_manifest,
     load_manifest,
     validate_manifest_entries,
     write_manifest,
@@ -82,8 +83,6 @@ class Importer(SqlServerIOBase):
         return load_manifest(manifest_file)
 
     def load_manifest_entries(self):
-        from pybutt.files.files import load_file_manifest
-
         manifest = load_file_manifest(
             self.input_path / self.manifest_filename, operation="Importer"
         )

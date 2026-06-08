@@ -61,11 +61,7 @@ IDENTIFIER_REGEX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # TVF parameters must be a comma-separated list of literals:
 # integers/decimals, single-quoted strings (no nested quotes), NULLs.
 _PARAM_TOKEN_RE = re.compile(
-    r"\s*(?:"
-    r"NULL"
-    r"|[+-]?\d+(?:\.\d+)?"
-    r"|'[^']*'"
-    r")\s*",
+    r"\s*(?:" r"NULL" r"|[+-]?\d+(?:\.\d+)?" r"|'[^']*'" r")\s*",
     re.IGNORECASE,
 )
 
