@@ -17,6 +17,15 @@ from .logobs import get_logger
 logger = get_logger("base")
 
 
+def rows_from_arrow(arrow_obj) -> list[tuple]:
+    """Convert an Arrow Table or RecordBatch to a list of row-tuples.
+
+    Works with both ``pyarrow.Table`` and ``pyarrow.RecordBatch`` (anything
+    with a ``.columns`` attribute whose elements support ``.to_pylist()``).
+    """
+    return list(zip(*[col.to_pylist() for col in arrow_obj.columns], strict=True))
+
+
 class SqlServerIOBase:
     def __init__(self, config: SqlConfig):
         self.config = config
@@ -26,31 +35,40 @@ class SqlServerIOBase:
 
         self.dsn = self.build_dsn()
 
-    def build_dsn(self):
+    def _connection_parts(self, *, include_driver: bool = True) -> list[str]:
+        """Build the common connection-string parts shared by all drivers."""
         cfg = self.config
-
-        parts = [
-            f"Driver={{{cfg.driver}}}",
-            f"Server={cfg.server}",
-            f"Database={cfg.database}",
-        ]
+        parts: list[str] = []
+        if include_driver:
+            parts.append(f"Driver={{{cfg.driver}}}")
+        parts.append(f"Server={cfg.server}")
+        parts.append(f"Database={cfg.database}")
 
         if cfg.trusted_connection:
             parts.append("Trusted_Connection=Yes")
         else:
-            if not cfg.username or not cfg.password:
-                raise ConfigurationError(
-                    "Username/password required when not using trusted connection"
-                )
-            parts.append(f"Uid={cfg.username}")
-            parts.append(f"Pwd={cfg.password}")
+            if include_driver:
+                if not cfg.username or not cfg.password:
+                    raise ConfigurationError(
+                        "Username/password required when not using trusted connection"
+                    )
+                parts.append(f"Uid={cfg.username}")
+                parts.append(f"Pwd={cfg.password}")
+            else:
+                if cfg.username:
+                    parts.append(f"UID={cfg.username}")
+                if cfg.password:
+                    parts.append(f"PWD={cfg.password}")
 
         parts.append(f"TrustServerCertificate={'Yes' if cfg.trust_cert else 'No'}")
 
         if cfg.encrypt:
             parts.append("Encrypt=Yes")
 
-        return ";".join(parts) + ";"
+        return parts
+
+    def build_dsn(self):
+        return ";".join(self._connection_parts(include_driver=True)) + ";"
 
     def connection_d(self):
         conn = d.connect()
@@ -63,27 +81,7 @@ class SqlServerIOBase:
         return conn
 
     def connection_m(self, autocommit=False):
-        cfg = self.config
-
-        parts = [
-            f"Server={cfg.server}",
-            f"Database={cfg.database}",
-        ]
-
-        if cfg.trusted_connection:
-            parts.append("Trusted_Connection=Yes")
-        else:
-            if cfg.username:
-                parts.append(f"UID={cfg.username}")
-            if cfg.password:
-                parts.append(f"PWD={cfg.password}")
-
-        parts.append(f"TrustServerCertificate={'Yes' if cfg.trust_cert else 'No'}")
-
-        if cfg.encrypt:
-            parts.append("Encrypt=Yes")
-
-        conn_str = ";".join(parts) + ";"
+        conn_str = ";".join(self._connection_parts(include_driver=False)) + ";"
         conn = mssql_python.connect(conn_str)
         conn.setautocommit(autocommit)
         return conn
@@ -112,7 +110,7 @@ class SqlServerIOBase:
                 last_error = e
                 safe_msg = self.safe_error_message(e)
                 logger.warning(
-                    f"{context} attempt {attempt+1}/{self.config.retries} "
+                    f"{context} attempt {attempt + 1}/{self.config.retries} "
                     f"failed: {safe_msg}"
                 )
                 time.sleep(2**attempt)

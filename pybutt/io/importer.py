@@ -1,4 +1,3 @@
-import json
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -6,14 +5,15 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
-from pybutt.core.base import SqlServerIOBase
+from pybutt.core.base import SqlServerIOBase, rows_from_arrow
 from pybutt.core.config import (
     DEFAULT_IMPORT_BATCH_SIZE,
-    ENGINE_CHOICES,
     SqlConfig,
     TransactionMode,
+    coerce_transaction_mode,
     quote_identifier,
     resolve_engine_default,
+    validate_engine,
 )
 from pybutt.core.logobs import (
     MemoryHeartbeat,
@@ -23,16 +23,15 @@ from pybutt.core.logobs import (
 )
 from pybutt.exceptions import (
     BatchImportError,
-    EngineSelectionError,
     RowGroupImportError,
     SchemaMismatchError,
-    UnsupportedManifestTypeError,
 )
 from pybutt.files.files import (
     default_manifest_filename,
     default_temp_manifest_filename,
     load_manifest,
     validate_manifest_entries,
+    write_manifest,
 )
 
 logger = get_logger("importer")
@@ -68,15 +67,8 @@ class Importer(SqlServerIOBase):
         )
 
         self.worker_count = worker_count
-        self.transaction_mode = (
-            TransactionMode(transaction_mode)
-            if isinstance(transaction_mode, str)
-            else transaction_mode
-        )
-        if engine not in ENGINE_CHOICES:
-            raise EngineSelectionError(
-                f"engine must be one of {sorted(ENGINE_CHOICES)}"
-            )
+        self.transaction_mode = coerce_transaction_mode(transaction_mode)
+        validate_engine(engine)
         self.engine = engine
         self.batch_size = resolve_engine_default(
             "batch_size", self.engine, batch_size, DEFAULT_IMPORT_BATCH_SIZE
@@ -90,11 +82,11 @@ class Importer(SqlServerIOBase):
         return load_manifest(manifest_file)
 
     def load_manifest_entries(self):
-        manifest = self.load_manifest()
-        if manifest["type"] != "files":
-            raise UnsupportedManifestTypeError(
-                f"Importer only supports file manifests, got: {manifest['type']}"
-            )
+        from pybutt.files.files import load_file_manifest
+
+        manifest = load_file_manifest(
+            self.input_path / self.manifest_filename, operation="Importer"
+        )
         return validate_manifest_entries(manifest, self.input_path)
 
     def _build_insert_sql(
@@ -103,10 +95,10 @@ class Importer(SqlServerIOBase):
         column_list = ", ".join(quote_identifier(col) for col in columns)
         placeholders = ", ".join("?" for _ in columns)
         table_name = target_table or self.full_table_name()
-        return f"INSERT INTO {table_name} " f"({column_list}) VALUES ({placeholders})"
+        return f"INSERT INTO {table_name} ({column_list}) VALUES ({placeholders})"
 
     def _rows_from_batch(self, batch):
-        return list(zip(*[col.to_pylist() for col in batch.columns], strict=True))
+        return rows_from_arrow(batch)
 
     def _validate_and_build_insert(
         self, cur, columns, filename, target_table: str | None = None
@@ -523,7 +515,7 @@ class Importer(SqlServerIOBase):
 
     def _rows_from_arrow_table(self, table):
         """Convert a PyArrow table to a list of tuples for bulkcopy."""
-        return list(zip(*[col.to_pylist() for col in table.columns], strict=True))
+        return rows_from_arrow(table)
 
     def _import_batch_with_retry(
         self,
@@ -559,7 +551,7 @@ class Importer(SqlServerIOBase):
 
                 if attempt < self.config.retries - 1:
                     logger.warning(
-                        f"batch insert attempt {attempt+1}/{self.config.retries} "
+                        f"batch insert attempt {attempt + 1}/{self.config.retries} "
                         "failed "
                         + context(
                             file=filename,
@@ -595,9 +587,7 @@ class Importer(SqlServerIOBase):
                 )
 
                 for batch in rowgroup_batches:
-                    rows = list(
-                        zip(*[col.to_pylist() for col in batch.columns], strict=True)
-                    )
+                    rows = rows_from_arrow(batch)
                     cur.executemany(insert_sql, rows)
                     total_rows += len(rows)
 
@@ -615,7 +605,7 @@ class Importer(SqlServerIOBase):
 
                 if attempt < self.config.retries - 1:
                     logger.warning(
-                        f"rowgroup insert attempt {attempt+1}/{self.config.retries} "
+                        f"rowgroup insert attempt {attempt + 1}/{self.config.retries} "
                         "failed " + context(file=filename, rg=rg) + f": {safe_msg}"
                     )
                     c.rollback()
@@ -629,35 +619,36 @@ class Importer(SqlServerIOBase):
 
     def _make_temp_table_name(self, worker_index: int) -> str:
         suffix = uuid.uuid4().hex[:8]
-        return f"{self.schema}.{self.table}_{worker_index+1:02d}_{suffix}"
+        return f"{self.schema}.{self.table}_{worker_index + 1:02d}_{suffix}"
 
     def _make_columnstore_index_name(self, temp_table_name: str) -> str:
         table_part = temp_table_name.split(".", 1)[-1]
         return quote_identifier(f"cci_{table_part}")
 
+    def _execute_temp_table_ddl(self, cur, count: int) -> list[str]:
+        """Run the CREATE TABLE / CCI DDL on a cursor, returning table names."""
+        temp_tables: list[str] = []
+        for i in range(count):
+            temp_table_name = self._make_temp_table_name(i)
+            cur.execute(
+                f"SELECT TOP 0 * INTO {temp_table_name} FROM {self.full_table_name()}"
+            )
+            if self.create_cci:
+                index_name = self._make_columnstore_index_name(temp_table_name)
+                cur.execute(
+                    f"CREATE CLUSTERED COLUMNSTORE INDEX {index_name} "
+                    f"ON {temp_table_name}"
+                )
+            temp_tables.append(temp_table_name)
+        return temp_tables
+
     def _create_temp_tables(self, count: int) -> list[str]:
-        temp_tables = []
         if self.engine == "mssql-python":
             conn = self.connection_m(autocommit=True)
             try:
                 cur = conn.cursor()
                 try:
-                    for i in range(count):
-                        temp_table_name = self._make_temp_table_name(i)
-                        cur.execute(
-                            "SELECT TOP 0 * "
-                            f"INTO {temp_table_name} "
-                            f"FROM {self.full_table_name()}"
-                        )
-                        if self.create_cci:
-                            index_name = self._make_columnstore_index_name(
-                                temp_table_name
-                            )
-                            cur.execute(
-                                f"CREATE CLUSTERED COLUMNSTORE INDEX {index_name} "
-                                f"ON {temp_table_name}"
-                            )
-                        temp_tables.append(temp_table_name)
+                    return self._execute_temp_table_ddl(cur, count)
                 finally:
                     cur.close()
             finally:
@@ -665,23 +656,7 @@ class Importer(SqlServerIOBase):
         else:
             with self.connection_p(autocommit=True) as conn:
                 with conn.cursor() as cur:
-                    for i in range(count):
-                        temp_table_name = self._make_temp_table_name(i)
-                        cur.execute(
-                            "SELECT TOP 0 * "
-                            f"INTO {temp_table_name} "
-                            f"FROM {self.full_table_name()}"
-                        )
-                        if self.create_cci:
-                            index_name = self._make_columnstore_index_name(
-                                temp_table_name
-                            )
-                            cur.execute(
-                                f"CREATE CLUSTERED COLUMNSTORE INDEX {index_name} "
-                                f"ON {temp_table_name}"
-                            )
-                        temp_tables.append(temp_table_name)
-        return temp_tables
+                    return self._execute_temp_table_ddl(cur, count)
 
     def _assign_files_to_workers(
         self, filenames: list[str], temp_tables: list[str]
@@ -693,18 +668,11 @@ class Importer(SqlServerIOBase):
         return assignments
 
     def _write_temp_manifest(self, temp_tables: list[str]) -> Path:
-        manifest_path = self.input_path / self.temp_manifest_filename
-        with open(manifest_path, "w") as f:
-            json.dump(
-                {
-                    "version": 2,
-                    "type": "tables",
-                    "entries": temp_tables,
-                },
-                f,
-                indent=4,
-            )
-        return manifest_path
+        return write_manifest(
+            self.input_path / self.temp_manifest_filename,
+            temp_tables,
+            manifest_type="tables",
+        )
 
     def _import_files_to_temp_table(self, target_table: str, filenames: list[str]):
         for filename in filenames:

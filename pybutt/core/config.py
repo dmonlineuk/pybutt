@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from pybutt.exceptions import InvalidIdentifierError
+from pybutt.exceptions import EngineSelectionError, InvalidIdentifierError
 
 ENGINE_CHOICES = frozenset({"duckdb", "pyodbc", "mssql-python"})
 
@@ -35,6 +35,21 @@ class TransactionMode(StrEnum):
     BATCH = "batch"  # Each batch of batch_size rows in its own transaction
     ROWGROUP = "rowgroup"  # Each row group in the parquet file in its own transaction
     FILE = "file"  # Entire file in one transaction
+
+
+def validate_engine(engine: str, allowed: frozenset[str] | None = None) -> str:
+    """Raise :class:`EngineSelectionError` if *engine* is not in *allowed*."""
+    choices = allowed if allowed is not None else ENGINE_CHOICES
+    if engine not in choices:
+        raise EngineSelectionError(f"engine must be one of {sorted(choices)}")
+    return engine
+
+
+def coerce_transaction_mode(mode: TransactionMode | str) -> TransactionMode:
+    """Accept a :class:`TransactionMode` or its string value and return the enum."""
+    if isinstance(mode, str):
+        return TransactionMode(mode)
+    return mode
 
 
 IDENTIFIER_REGEX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")

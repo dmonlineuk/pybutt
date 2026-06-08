@@ -1,12 +1,9 @@
 from collections.abc import Iterable
 
 from pybutt.core.base import SqlServerIOBase
-from pybutt.core.config import ENGINE_CHOICES, TransactionMode
+from pybutt.core.config import TransactionMode, coerce_transaction_mode, validate_engine
 from pybutt.core.logobs import context, get_logger
-from pybutt.exceptions import (
-    EngineSelectionError,
-    SchemaMismatchError,
-)
+from pybutt.exceptions import SchemaMismatchError
 
 logger = get_logger("merger")
 
@@ -26,15 +23,8 @@ class TableMerger(SqlServerIOBase):
     ):
         super().__init__(config)
         self.sources: list[str] = list(sources)
-        self.transaction_mode = (
-            TransactionMode(transaction_mode)
-            if isinstance(transaction_mode, str)
-            else transaction_mode
-        )
-        if engine not in ("pyodbc", "duckdb"):
-            raise EngineSelectionError(
-                f"engine must be one of {sorted(ENGINE_CHOICES)}"
-            )
+        self.transaction_mode = coerce_transaction_mode(transaction_mode)
+        validate_engine(engine, allowed=frozenset({"pyodbc", "duckdb"}))
         self.engine = engine
 
     def _parse_schema_table(self, fq: str) -> tuple[str, str]:
