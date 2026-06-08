@@ -111,11 +111,7 @@ class Importer(SqlServerIOBase):
     def _validate_and_build_insert(
         self, cur, columns, filename, target_table: str | None = None
     ):
-        try:
-            table_columns = self.get_table_columns(cur, target_table=target_table)
-        except TypeError:
-            table_columns = self.get_table_columns(cur)
-
+        table_columns = self.get_table_columns(cur, target_table=target_table)
         self.validate_schema(columns, table_columns, filename)
         return self._build_insert_sql(columns, target_table=target_table)
 

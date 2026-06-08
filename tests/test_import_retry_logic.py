@@ -320,7 +320,7 @@ class TestRowGroupModeRetry:
         mock_connection.__enter__.return_value = mock_connection
         mock_connection.__exit__.return_value = None
 
-        importer.get_table_columns = lambda cur: ["col1"]
+        importer.get_table_columns = lambda cur, target_table=None: ["col1"]
 
         with patch.object(importer, "connection_p", return_value=mock_connection):
             importer._import_file_with_duckdb(parquet_file, "test.parquet", time.time())

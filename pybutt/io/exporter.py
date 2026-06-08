@@ -614,7 +614,10 @@ class Exporter(SqlServerIOBase):
                 + context(file=manifest_file)
                 + f": {self.safe_error_message(e)}"
             )
-            raise
+            raise DataExportError(
+                f"Failed to write manifest {manifest_file}: "
+                f"{self.safe_error_message(e)}"
+            ) from e
 
 
 if __name__ == "__main__":
