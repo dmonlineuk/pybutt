@@ -54,9 +54,7 @@ class TestTableMergerInit:
         assert merger.transaction_mode == TransactionMode.BATCH
 
     def test_transaction_mode_from_string(self, mock_config):
-        merger = TableMerger(
-            mock_config, sources=["dbo.A"], transaction_mode="file"
-        )
+        merger = TableMerger(mock_config, sources=["dbo.A"], transaction_mode="file")
         assert merger.transaction_mode == TransactionMode.FILE
 
     def test_transaction_mode_enum(self, mock_config):
@@ -147,10 +145,12 @@ class TestEnsureTargetExistsAndSchema:
         obj_id_row.__getitem__ = lambda self, idx: 12345
         mock_cur.fetchone.return_value = obj_id_row
 
-        descriptions = iter([
-            [("col_a",), ("col_b",)],  # source columns
-            [("col_x",), ("col_y",)],  # target columns - different!
-        ])
+        descriptions = iter(
+            [
+                [("col_a",), ("col_b",)],  # source columns
+                [("col_x",), ("col_y",)],  # target columns - different!
+            ]
+        )
         type(mock_cur).description = property(lambda self: next(descriptions))
 
         with pytest.raises(SchemaMismatchError):

@@ -180,30 +180,37 @@ class TestPyodbcTypeMapping:
 
     def test_integer_types(self, mock_config, tmp_path):
         exp = _make_exporter(mock_config, tmp_path)
-        assert exp._pyodbc_type_code_to_pyarrow(
-            pyodbc.SQL_TINYINT, None, None, None
-        ) == pa.int32()
-        assert exp._pyodbc_type_code_to_pyarrow(
-            pyodbc.SQL_SMALLINT, None, None, None
-        ) == pa.int32()
-        assert exp._pyodbc_type_code_to_pyarrow(
-            pyodbc.SQL_INTEGER, None, None, None
-        ) == pa.int32()
-        assert exp._pyodbc_type_code_to_pyarrow(
-            pyodbc.SQL_BIGINT, None, None, None
-        ) == pa.int64()
+        assert (
+            exp._pyodbc_type_code_to_pyarrow(pyodbc.SQL_TINYINT, None, None, None)
+            == pa.int32()
+        )
+        assert (
+            exp._pyodbc_type_code_to_pyarrow(pyodbc.SQL_SMALLINT, None, None, None)
+            == pa.int32()
+        )
+        assert (
+            exp._pyodbc_type_code_to_pyarrow(pyodbc.SQL_INTEGER, None, None, None)
+            == pa.int32()
+        )
+        assert (
+            exp._pyodbc_type_code_to_pyarrow(pyodbc.SQL_BIGINT, None, None, None)
+            == pa.int64()
+        )
 
     def test_float_types(self, mock_config, tmp_path):
         exp = _make_exporter(mock_config, tmp_path)
-        assert exp._pyodbc_type_code_to_pyarrow(
-            pyodbc.SQL_REAL, None, None, None
-        ) == pa.float32()
-        assert exp._pyodbc_type_code_to_pyarrow(
-            pyodbc.SQL_FLOAT, None, None, None
-        ) == pa.float32()
-        assert exp._pyodbc_type_code_to_pyarrow(
-            pyodbc.SQL_DOUBLE, None, None, None
-        ) == pa.float64()
+        assert (
+            exp._pyodbc_type_code_to_pyarrow(pyodbc.SQL_REAL, None, None, None)
+            == pa.float32()
+        )
+        assert (
+            exp._pyodbc_type_code_to_pyarrow(pyodbc.SQL_FLOAT, None, None, None)
+            == pa.float32()
+        )
+        assert (
+            exp._pyodbc_type_code_to_pyarrow(pyodbc.SQL_DOUBLE, None, None, None)
+            == pa.float64()
+        )
 
     def test_decimal_type(self, mock_config, tmp_path):
         exp = _make_exporter(mock_config, tmp_path)
@@ -234,15 +241,17 @@ class TestPyodbcTypeMapping:
 
     def test_bit_type(self, mock_config, tmp_path):
         exp = _make_exporter(mock_config, tmp_path)
-        assert exp._pyodbc_type_code_to_pyarrow(
-            pyodbc.SQL_BIT, None, None, None
-        ) == pa.bool_()
+        assert (
+            exp._pyodbc_type_code_to_pyarrow(pyodbc.SQL_BIT, None, None, None)
+            == pa.bool_()
+        )
 
     def test_date_type(self, mock_config, tmp_path):
         exp = _make_exporter(mock_config, tmp_path)
-        assert exp._pyodbc_type_code_to_pyarrow(
-            pyodbc.SQL_TYPE_DATE, None, None, None
-        ) == pa.date32()
+        assert (
+            exp._pyodbc_type_code_to_pyarrow(pyodbc.SQL_TYPE_DATE, None, None, None)
+            == pa.date32()
+        )
 
     def test_time_type(self, mock_config, tmp_path):
         exp = _make_exporter(mock_config, tmp_path)
