@@ -8,6 +8,7 @@ import pyarrow.parquet as pq
 from pybutt.core.base import SqlServerIOBase, rows_from_arrow
 from pybutt.core.config import (
     DEFAULT_IMPORT_BATCH_SIZE,
+    DEFAULT_MEM_HEARTBEAT,
     SqlConfig,
     TransactionMode,
     coerce_transaction_mode,
@@ -51,7 +52,7 @@ class Importer(SqlServerIOBase):
         temp_manifest_filename: str | None = None,
         delete_files: bool = False,
         create_cci: bool = True,
-        mem_heartbeat: float = 0,
+        mem_heartbeat: float = DEFAULT_MEM_HEARTBEAT,
     ):
         super().__init__(config)
 
@@ -209,6 +210,14 @@ class Importer(SqlServerIOBase):
 
                 total_rg = parquet_file.num_row_groups
                 for rg_idx in range(total_rg):
+                    logger.debug(
+                        "Reading row group "
+                        + context(
+                            file=filename,
+                            rg=f"{rg_idx + 1}/{total_rg}",
+                            **mem_fields(),
+                        )
+                    )
                     table = parquet_file.read_row_group(rg_idx)
 
                     if self.transaction_mode == TransactionMode.ROWGROUP:
@@ -269,11 +278,23 @@ class Importer(SqlServerIOBase):
                 )
 
     def _load_parquet_with_duckdb(self, filepath):
+        logger.debug(
+            "Loading parquet via DuckDB " + context(file=str(filepath), **mem_fields())
+        )
         with self.connection_d() as dconn:
             sanitized_path = str(filepath.as_posix()).replace("'", "''")
-            return dconn.execute(
+            table = dconn.execute(
                 f"SELECT * FROM read_parquet('{sanitized_path}')"
             ).fetch_arrow_table()
+            logger.debug(
+                "Loaded parquet via DuckDB "
+                + context(
+                    file=str(filepath),
+                    rows=table.num_rows,
+                    **mem_fields(),
+                )
+            )
+            return table
 
     def _import_file_with_duckdb(
         self, filepath, filename, start, target_table: str | None = None
@@ -298,6 +319,14 @@ class Importer(SqlServerIOBase):
 
                 if self.transaction_mode == TransactionMode.ROWGROUP:
                     for rg_idx in range(parquet_file.num_row_groups):
+                        logger.debug(
+                            "Reading row group "
+                            + context(
+                                file=filename,
+                                rg=f"{rg_idx + 1}/{parquet_file.num_row_groups}",
+                                **mem_fields(),
+                            )
+                        )
                         rowgroup_table = parquet_file.read_row_group(rg_idx)
                         rows_in_rg = self._import_rowgroup_with_retry(
                             c,
@@ -371,6 +400,14 @@ class Importer(SqlServerIOBase):
             total_rg = parquet_file.num_row_groups
             if self.transaction_mode == TransactionMode.ROWGROUP:
                 for rg_idx in range(total_rg):
+                    logger.debug(
+                        "Reading row group "
+                        + context(
+                            file=filename,
+                            rg=f"{rg_idx + 1}/{total_rg}",
+                            **mem_fields(),
+                        )
+                    )
                     table = parquet_file.read_row_group(rg_idx)
                     rows_in_rg = self._mssql_bulkcopy_with_retry(
                         conn,
@@ -393,6 +430,14 @@ class Importer(SqlServerIOBase):
                     )
             else:
                 for rg_idx in range(total_rg):
+                    logger.debug(
+                        "Reading row group "
+                        + context(
+                            file=filename,
+                            rg=f"{rg_idx + 1}/{total_rg}",
+                            **mem_fields(),
+                        )
+                    )
                     table = parquet_file.read_row_group(rg_idx)
                     for batch_idx, batch in enumerate(
                         table.to_batches(max_chunksize=self.batch_size)

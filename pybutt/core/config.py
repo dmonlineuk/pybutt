@@ -13,6 +13,10 @@ ENGINE_CHOICES = frozenset({"duckdb", "pyodbc", "mssql-python"})
 # Generic (engine-independent) fallback for the import batch size.
 DEFAULT_IMPORT_BATCH_SIZE = 1_000
 
+# Default memory heartbeat interval in seconds. Set to 30 so operators always
+# have a recent RSS breadcrumb trail when a worker is OOM-killed.
+DEFAULT_MEM_HEARTBEAT: float = 30.0
+
 # Per-engine default overrides, keyed by tunable name then engine. Only values
 # that diverge from the generic fallback are listed; everything else falls back.
 # See docs/defaults.md for the rationale behind each entry.

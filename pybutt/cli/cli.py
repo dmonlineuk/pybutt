@@ -7,6 +7,7 @@ from pathlib import Path
 import typer
 
 from pybutt.core.config import (
+    DEFAULT_MEM_HEARTBEAT,
     SqlConfig,
     TransactionMode,
 )
@@ -245,9 +246,12 @@ def export(
         case_sensitive=False,
     ),
     mem_heartbeat: float = typer.Option(  # noqa: B008
-        0,
+        DEFAULT_MEM_HEARTBEAT,
         "--mem-heartbeat",
-        help="Log process memory (RSS) every N seconds. 0 disables (default).",
+        help=(
+            "Log process memory (RSS + system %%) every N seconds. "
+            f"Default: {DEFAULT_MEM_HEARTBEAT}s. Set to 0 to disable."
+        ),
         min=0,
     ),
     verbose: bool = typer.Option(  # noqa: B008
@@ -440,9 +444,12 @@ def import_data(
         ),
     ),
     mem_heartbeat: float = typer.Option(  # noqa: B008
-        0,
+        DEFAULT_MEM_HEARTBEAT,
         "--mem-heartbeat",
-        help="Log process memory (RSS) every N seconds. 0 disables (default).",
+        help=(
+            "Log process memory (RSS + system %%) every N seconds. "
+            f"Default: {DEFAULT_MEM_HEARTBEAT}s. Set to 0 to disable."
+        ),
         min=0,
     ),
 ) -> None:
