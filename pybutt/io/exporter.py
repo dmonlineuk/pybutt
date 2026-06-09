@@ -27,6 +27,8 @@ from pybutt.core.logobs import (
     context,
     get_logger,
     init_worker_logging,
+    log_failure_summary,
+    log_memory_budget,
     mem_fields,
 )
 from pybutt.exceptions import (
@@ -529,6 +531,13 @@ class Exporter(SqlServerIOBase):
         start = time.time()
         manifest_file = self.output_path / self.manifest_filename
 
+        log_memory_budget(
+            operation="export",
+            workers=self.worker_count,
+            total_rows=getattr(self, "total_rows", None),
+            threshold_pct=self.mem_gate.threshold_pct,
+        )
+
         # Spawned worker processes re-import modules and do NOT inherit the
         # parent's logging config, so configure it in each via the initialiser
         # (spawn is the default on Windows/macOS and is forced here on all OSes).
@@ -557,6 +566,11 @@ class Exporter(SqlServerIOBase):
                 "Export pool failed - a worker may have terminated abnormally "
                 "(possible out-of-memory/SIGKILL); check earlier per-partition "
                 f"logs: {self.safe_error_message(e)}"
+            )
+            log_failure_summary(
+                operation="export",
+                workers=self.worker_count,
+                failed_error=self.safe_error_message(e),
             )
             raise
 

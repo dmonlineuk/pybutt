@@ -148,6 +148,82 @@ def mem_fields() -> dict[str, str]:
     }
 
 
+def log_memory_budget(
+    *,
+    operation: str,
+    workers: int,
+    total_rows: int | None = None,
+    threshold_pct: float = 0,
+) -> None:
+    """Log a pre-flight memory budget so operators can gauge headroom.
+
+    Called once before ``perform_work()`` begins real processing. The
+    estimate is deliberately rough (and labelled as such) — it exists to
+    surface an immediate "this probably won't fit" signal, not to be
+    precise.
+    """
+    log = get_logger("budget")
+    try:
+        vm = psutil.virtual_memory()
+    except Exception:
+        return
+
+    avail = vm.available
+    total = vm.total
+    pct = vm.percent
+
+    parts = [
+        f"operation={operation}",
+        f"workers={workers}",
+        f"sys_total={_human_bytes(total)}",
+        f"sys_avail={_human_bytes(avail)}",
+        f"sys_pct={pct:.0f}%",
+    ]
+    if total_rows is not None:
+        parts.append(f"total_rows={total_rows}")
+    if threshold_pct > 0:
+        headroom_bytes = int(total * (1 - threshold_pct / 100)) - (total - avail)
+        parts.append(f"threshold={threshold_pct:.0f}%")
+        parts.append(f"headroom={_human_bytes(max(headroom_bytes, 0))}")
+
+    log.info("Memory budget " + " ".join(parts))
+
+
+def log_failure_summary(
+    *,
+    operation: str,
+    workers: int,
+    completed: list[str] | None = None,
+    failed_error: str = "",
+) -> None:
+    """Log a structured post-mortem when a pool/executor fails.
+
+    Gives the operator a concise picture of what finished before the
+    failure so they know how much progress was lost.
+    """
+    log = get_logger("postmortem")
+    try:
+        vm = psutil.virtual_memory()
+        sys_info = f"sys_pct={vm.percent:.0f}% sys_avail={_human_bytes(vm.available)}"
+    except Exception:
+        sys_info = ""
+
+    completed = completed or []
+    parts = [
+        f"operation={operation}",
+        f"workers={workers}",
+        f"completed={len(completed)}/{workers}",
+    ]
+    if sys_info:
+        parts.append(sys_info)
+    if failed_error:
+        parts.append(f"error={failed_error}")
+
+    log.error("FAILURE SUMMARY " + " ".join(parts))
+    if completed:
+        log.error(f"  Completed units: {', '.join(completed)}")
+
+
 class MemoryHeartbeat:
     """Periodically log process RSS while a long operation runs.
 

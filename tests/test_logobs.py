@@ -31,6 +31,8 @@ from pybutt.core.logobs import (
     context,
     get_logger,
     init_worker_logging,
+    log_failure_summary,
+    log_memory_budget,
     mem_fields,
     rss_bytes,
     sys_mem_fields,
@@ -395,6 +397,70 @@ def test_memory_gate_respects_max_wait():
     gate = MemoryGate(threshold_pct=1.0, sleep_seconds=0.05, max_wait=0.1)
     waited = gate.check("timeout_test")
     assert waited <= 0.2  # max_wait + one sleep cycle
+
+
+def test_log_memory_budget_emits_info(caplog):
+    pybutt_logger = logging.getLogger(LOGGER_NAME)
+    pybutt_logger.addHandler(caplog.handler)
+    pybutt_logger.setLevel(logging.INFO)
+
+    log_memory_budget(operation="export", workers=4, threshold_pct=85.0)
+
+    budget_msgs = [r.message for r in caplog.records if "Memory budget" in r.message]
+    assert budget_msgs, "expected a memory budget line"
+    assert "operation=export" in budget_msgs[0]
+    assert "workers=4" in budget_msgs[0]
+    assert "sys_total=" in budget_msgs[0]
+    assert "headroom=" in budget_msgs[0]
+
+
+def test_log_memory_budget_includes_total_rows(caplog):
+    pybutt_logger = logging.getLogger(LOGGER_NAME)
+    pybutt_logger.addHandler(caplog.handler)
+    pybutt_logger.setLevel(logging.INFO)
+
+    log_memory_budget(operation="import", workers=2, total_rows=1_000_000)
+
+    budget_msgs = [r.message for r in caplog.records if "Memory budget" in r.message]
+    assert budget_msgs
+    assert "total_rows=1000000" in budget_msgs[0]
+
+
+def test_log_failure_summary_emits_error(caplog):
+    pybutt_logger = logging.getLogger(LOGGER_NAME)
+    pybutt_logger.addHandler(caplog.handler)
+    pybutt_logger.setLevel(logging.ERROR)
+
+    log_failure_summary(
+        operation="export",
+        workers=4,
+        completed=["part_0", "part_1"],
+        failed_error="worker died",
+    )
+
+    error_msgs = [r.message for r in caplog.records if "FAILURE SUMMARY" in r.message]
+    assert error_msgs, "expected a failure summary line"
+    assert "operation=export" in error_msgs[0]
+    assert "completed=2/4" in error_msgs[0]
+    assert "error=worker died" in error_msgs[0]
+
+    completed_msgs = [
+        r.message for r in caplog.records if "Completed units" in r.message
+    ]
+    assert completed_msgs
+    assert "part_0" in completed_msgs[0]
+
+
+def test_log_failure_summary_no_completed(caplog):
+    pybutt_logger = logging.getLogger(LOGGER_NAME)
+    pybutt_logger.addHandler(caplog.handler)
+    pybutt_logger.setLevel(logging.ERROR)
+
+    log_failure_summary(operation="import", workers=2, failed_error="timeout")
+
+    error_msgs = [r.message for r in caplog.records if "FAILURE SUMMARY" in r.message]
+    assert error_msgs
+    assert "completed=0/2" in error_msgs[0]
 
 
 def test_importer_accepts_mem_heartbeat(tmp_path, mock_config):

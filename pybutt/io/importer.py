@@ -24,6 +24,8 @@ from pybutt.core.logobs import (
     MemoryHeartbeat,
     context,
     get_logger,
+    log_failure_summary,
+    log_memory_budget,
     mem_fields,
 )
 from pybutt.exceptions import (
@@ -758,6 +760,12 @@ class Importer(SqlServerIOBase):
     def _perform_work(self):
         filenames = self.load_manifest_entries()
 
+        log_memory_budget(
+            operation="import",
+            workers=self.worker_count,
+            threshold_pct=self.mem_gate.threshold_pct,
+        )
+
         if self.worker_count > 1 and len(filenames) > 1:
             worker_count = min(self.worker_count, len(filenames))
             temp_tables = self._create_temp_tables(worker_count)
@@ -804,10 +812,12 @@ class Importer(SqlServerIOBase):
         the first failure.
         """
         first_error: Exception | None = None
+        completed_units: list[str] = []
         for future in as_completed(futures):
             unit = futures[future]
             try:
                 future.result()
+                completed_units.append(str(unit))
             except Exception as e:
                 logger.error(
                     "Worker failed "
@@ -817,6 +827,12 @@ class Importer(SqlServerIOBase):
                 if first_error is None:
                     first_error = e
         if first_error is not None:
+            log_failure_summary(
+                operation="import",
+                workers=len(futures),
+                completed=completed_units,
+                failed_error=self.safe_error_message(first_error),
+            )
             raise first_error
 
 
