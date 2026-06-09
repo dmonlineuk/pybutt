@@ -214,15 +214,24 @@ def test_export_command_manifest_version_is_2(monkeypatch, tmp_path):
         exporter_module.Exporter, "export_partition", fake_export_partition
     )
 
+    class _AsyncResult:
+        def __init__(self, value):
+            self._value = value
+
+        def get(self):
+            return self._value
+
     class DummyPool:
+        _pool = []
+
         def __enter__(self):
             return self
 
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def map(self, func, args):
-            return [func(arg) for arg in args]
+        def map_async(self, func, args):
+            return _AsyncResult([func(arg) for arg in args])
 
     class DummyContext:
         def Pool(self, count, **kwargs):
@@ -291,15 +300,24 @@ def test_export_command_supports_view_like_objects(monkeypatch, tmp_path):
         filepath.write_text("dummy")
         return filename
 
+    class _AsyncResult2:
+        def __init__(self, value):
+            self._value = value
+
+        def get(self):
+            return self._value
+
     class DummyPool:
+        _pool = []
+
         def __enter__(self):
             return self
 
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def map(self, func, args):
-            return [func(arg) for arg in args]
+        def map_async(self, func, args):
+            return _AsyncResult2([func(arg) for arg in args])
 
     class DummyContext:
         def Pool(self, count, **kwargs):

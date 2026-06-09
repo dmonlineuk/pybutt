@@ -446,7 +446,14 @@ class TestPerformWork:
             mock_pool = MagicMock()
             mock_pool.__enter__ = MagicMock(return_value=mock_pool)
             mock_pool.__exit__ = MagicMock(return_value=False)
-            mock_pool.map.side_effect = lambda fn, iterable: [fn(n) for n in iterable]
+            mock_pool._pool = []  # no real workers
+
+            def _fake_map_async(fn, iterable):
+                result = MagicMock()
+                result.get.return_value = [fn(n) for n in iterable]
+                return result
+
+            mock_pool.map_async.side_effect = _fake_map_async
             mock_ctx.return_value.Pool.return_value = mock_pool
 
             exp.perform_work()
@@ -469,7 +476,11 @@ class TestPerformWork:
             mock_pool = MagicMock()
             mock_pool.__enter__ = MagicMock(return_value=mock_pool)
             mock_pool.__exit__ = MagicMock(return_value=False)
-            mock_pool.map.side_effect = RuntimeError("worker died")
+            mock_pool._pool = []
+
+            mock_result = MagicMock()
+            mock_result.get.side_effect = RuntimeError("worker died")
+            mock_pool.map_async.return_value = mock_result
             mock_ctx.return_value.Pool.return_value = mock_pool
 
             with pytest.raises(RuntimeError, match="worker died"):

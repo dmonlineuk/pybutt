@@ -19,6 +19,7 @@ from pybutt.core.config import (
 )
 from pybutt.core.logobs import (
     MemoryHeartbeat,
+    WorkerMonitor,
     context,
     get_logger,
     init_worker_logging,
@@ -507,6 +508,13 @@ class Exporter(SqlServerIOBase):
 
         return filename
 
+    def _get_pool_worker_pids(self, pool) -> list[int]:
+        """Extract worker PIDs from a multiprocessing Pool."""
+        try:
+            return [w.pid for w in pool._pool if w.pid is not None]
+        except Exception:
+            return []
+
     def perform_work(self):
         start = time.time()
         manifest_file = self.output_path / self.manifest_filename
@@ -521,7 +529,17 @@ class Exporter(SqlServerIOBase):
                 initializer=init_worker_logging,
                 initargs=(worker_level,),
             ) as p:
-                filenames = p.map(self.export_partition, range(self.partition_count))
+                # Use map_async so we can extract PIDs and start the monitor
+                # before blocking on results.
+                result = p.map_async(self.export_partition, range(self.partition_count))
+                pids = self._get_pool_worker_pids(p)
+                if pids:
+                    logger.info(
+                        "Worker pool started "
+                        + context(workers=len(pids), pids=",".join(map(str, pids)))
+                    )
+                with WorkerMonitor(pids, self.mem_heartbeat):
+                    filenames = result.get()
         except Exception as e:
             # A worker killed abruptly (e.g. OOM/SIGKILL) surfaces here without a
             # partition context; make the likely cause explicit.
