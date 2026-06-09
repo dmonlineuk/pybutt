@@ -17,6 +17,15 @@ DEFAULT_IMPORT_BATCH_SIZE = 1_000
 # have a recent RSS breadcrumb trail when a worker is OOM-killed.
 DEFAULT_MEM_HEARTBEAT: float = 30.0
 
+# Default memory-pressure throttle threshold (% system memory used). When system
+# memory exceeds this %, workers sleep until pressure drops. Set to 85% so OOM
+# kill is avoided without throttling during normal operation.
+DEFAULT_MEM_THRESHOLD: float = 85.0
+
+# Seconds to sleep per throttle cycle and max total wait before giving up.
+DEFAULT_MEM_SLEEP: float = 5.0
+DEFAULT_MEM_MAX_WAIT: float = 300.0
+
 # Per-engine default overrides, keyed by tunable name then engine. Only values
 # that diverge from the generic fallback are listed; everything else falls back.
 # See docs/defaults.md for the rationale behind each entry.

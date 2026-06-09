@@ -8,10 +8,13 @@ import typer
 
 from pybutt.core.config import (
     DEFAULT_MEM_HEARTBEAT,
+    DEFAULT_MEM_MAX_WAIT,
+    DEFAULT_MEM_SLEEP,
+    DEFAULT_MEM_THRESHOLD,
     SqlConfig,
     TransactionMode,
 )
-from pybutt.core.logobs import configure_logging
+from pybutt.core.logobs import configure_logging, get_logger
 from pybutt.exceptions import PyButtError
 from pybutt.files.files import (
     inspect_manifest,
@@ -32,6 +35,8 @@ files. Can also be used for inspecting Parquet files and merging files or tables
 based on manifest definitions.
 """,
 )
+
+logger = get_logger("cli")
 
 
 def _get_project_version() -> str:
@@ -254,6 +259,35 @@ def export(
         ),
         min=0,
     ),
+    mem_threshold: float = typer.Option(  # noqa: B008
+        DEFAULT_MEM_THRESHOLD,
+        "--mem-threshold",
+        help=(
+            "System memory %% at which workers are throttled. "
+            f"Default: {DEFAULT_MEM_THRESHOLD}%%. "
+            "Set to 0 to disable throttling."
+        ),
+        min=0,
+        max=100,
+    ),
+    mem_sleep: float = typer.Option(  # noqa: B008
+        DEFAULT_MEM_SLEEP,
+        "--mem-sleep",
+        help=(
+            "Seconds to sleep per throttle check when memory is high. "
+            f"Default: {DEFAULT_MEM_SLEEP}s."
+        ),
+        min=0.1,
+    ),
+    mem_max_wait: float = typer.Option(  # noqa: B008
+        DEFAULT_MEM_MAX_WAIT,
+        "--mem-max-wait",
+        help=(
+            "Max total seconds to wait during memory throttling before "
+            f"giving up. Default: {DEFAULT_MEM_MAX_WAIT}s."
+        ),
+        min=0,
+    ),
     verbose: bool = typer.Option(  # noqa: B008
         False,
         "--verbose",
@@ -268,6 +302,13 @@ def export(
     """
 
     configure_logging(verbose)
+
+    if mem_threshold > 0:
+        logger.info(
+            "Memory throttling enabled: workers will sleep when system "
+            f"memory exceeds {mem_threshold:.0f}%% "
+            f"(--mem-threshold 0 to disable)"
+        )
 
     config = build_sql_config(
         server=server,
@@ -297,6 +338,9 @@ def export(
             manifest_filename=manifest_filename,
             parameters=parameters,
             mem_heartbeat=mem_heartbeat,
+            mem_threshold=mem_threshold,
+            mem_sleep=mem_sleep,
+            mem_max_wait=mem_max_wait,
         )
         exporter.perform_work()
     except PyButtError as exc:
@@ -452,6 +496,35 @@ def import_data(
         ),
         min=0,
     ),
+    mem_threshold: float = typer.Option(  # noqa: B008
+        DEFAULT_MEM_THRESHOLD,
+        "--mem-threshold",
+        help=(
+            "System memory %% at which workers are throttled. "
+            f"Default: {DEFAULT_MEM_THRESHOLD}%%. "
+            "Set to 0 to disable throttling."
+        ),
+        min=0,
+        max=100,
+    ),
+    mem_sleep: float = typer.Option(  # noqa: B008
+        DEFAULT_MEM_SLEEP,
+        "--mem-sleep",
+        help=(
+            "Seconds to sleep per throttle check when memory is high. "
+            f"Default: {DEFAULT_MEM_SLEEP}s."
+        ),
+        min=0.1,
+    ),
+    mem_max_wait: float = typer.Option(  # noqa: B008
+        DEFAULT_MEM_MAX_WAIT,
+        "--mem-max-wait",
+        help=(
+            "Max total seconds to wait during memory throttling before "
+            f"giving up. Default: {DEFAULT_MEM_MAX_WAIT}s."
+        ),
+        min=0,
+    ),
 ) -> None:
     """Import Parquet files into a SQL Server table.
 
@@ -460,6 +533,13 @@ def import_data(
     """
 
     configure_logging(verbose)
+
+    if mem_threshold > 0:
+        logger.info(
+            "Memory throttling enabled: threads will sleep when system "
+            f"memory exceeds {mem_threshold:.0f}%% "
+            f"(--mem-threshold 0 to disable)"
+        )
 
     config = build_sql_config(
         server=server,
@@ -488,6 +568,9 @@ def import_data(
             delete_files=delete_files,
             create_cci=cci,
             mem_heartbeat=mem_heartbeat,
+            mem_threshold=mem_threshold,
+            mem_sleep=mem_sleep,
+            mem_max_wait=mem_max_wait,
         )
         importer.perform_work()
     except PyButtError as exc:

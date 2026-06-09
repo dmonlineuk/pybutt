@@ -39,6 +39,9 @@ class DummyExporter:
         manifest_filename=None,
         parameters=None,
         mem_heartbeat=0,
+        mem_threshold=0,
+        mem_sleep=5.0,
+        mem_max_wait=300.0,
     ):
         self.config = config
         self.output_path = Path(output_path)
@@ -52,6 +55,9 @@ class DummyExporter:
         self.manifest_filename = manifest_filename
         self.parameters = parameters
         self.mem_heartbeat = mem_heartbeat
+        self.mem_threshold = mem_threshold
+        self.mem_sleep = mem_sleep
+        self.mem_max_wait = mem_max_wait
         DummyExporter.last_instance = self
 
     def perform_work(self):
@@ -74,6 +80,9 @@ class DummyImporter:
         delete_files=False,
         create_cci=True,
         mem_heartbeat=0,
+        mem_threshold=0,
+        mem_sleep=5.0,
+        mem_max_wait=300.0,
     ):
         self.config = config
         self.input_path = Path(input_path)
@@ -86,6 +95,9 @@ class DummyImporter:
         self.delete_files = delete_files
         self.create_cci = create_cci
         self.mem_heartbeat = mem_heartbeat
+        self.mem_threshold = mem_threshold
+        self.mem_sleep = mem_sleep
+        self.mem_max_wait = mem_max_wait
         DummyImporter.last_instance = self
 
     def perform_work(self):

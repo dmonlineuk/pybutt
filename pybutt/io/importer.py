@@ -9,6 +9,9 @@ from pybutt.core.base import SqlServerIOBase, rows_from_arrow
 from pybutt.core.config import (
     DEFAULT_IMPORT_BATCH_SIZE,
     DEFAULT_MEM_HEARTBEAT,
+    DEFAULT_MEM_MAX_WAIT,
+    DEFAULT_MEM_SLEEP,
+    DEFAULT_MEM_THRESHOLD,
     SqlConfig,
     TransactionMode,
     coerce_transaction_mode,
@@ -17,6 +20,7 @@ from pybutt.core.config import (
     validate_engine,
 )
 from pybutt.core.logobs import (
+    MemoryGate,
     MemoryHeartbeat,
     context,
     get_logger,
@@ -53,6 +57,9 @@ class Importer(SqlServerIOBase):
         delete_files: bool = False,
         create_cci: bool = True,
         mem_heartbeat: float = DEFAULT_MEM_HEARTBEAT,
+        mem_threshold: float = DEFAULT_MEM_THRESHOLD,
+        mem_sleep: float = DEFAULT_MEM_SLEEP,
+        mem_max_wait: float = DEFAULT_MEM_MAX_WAIT,
     ):
         super().__init__(config)
 
@@ -78,6 +85,7 @@ class Importer(SqlServerIOBase):
         self.delete_files = delete_files
         self.create_cci = create_cci
         self.mem_heartbeat = mem_heartbeat
+        self.mem_gate = MemoryGate(mem_threshold, mem_sleep, mem_max_wait)
 
     def load_manifest(self):
         manifest_file = self.input_path / self.manifest_filename
@@ -210,6 +218,9 @@ class Importer(SqlServerIOBase):
 
                 total_rg = parquet_file.num_row_groups
                 for rg_idx in range(total_rg):
+                    self.mem_gate.check(
+                        f"read_row_group file={filename} rg={rg_idx + 1}/{total_rg}"
+                    )
                     logger.debug(
                         "Reading row group "
                         + context(
@@ -319,6 +330,10 @@ class Importer(SqlServerIOBase):
 
                 if self.transaction_mode == TransactionMode.ROWGROUP:
                     for rg_idx in range(parquet_file.num_row_groups):
+                        self.mem_gate.check(
+                            f"read_row_group file={filename}"
+                            f" rg={rg_idx + 1}/{parquet_file.num_row_groups}"
+                        )
                         logger.debug(
                             "Reading row group "
                             + context(
@@ -400,6 +415,9 @@ class Importer(SqlServerIOBase):
             total_rg = parquet_file.num_row_groups
             if self.transaction_mode == TransactionMode.ROWGROUP:
                 for rg_idx in range(total_rg):
+                    self.mem_gate.check(
+                        f"read_row_group file={filename} rg={rg_idx + 1}/{total_rg}"
+                    )
                     logger.debug(
                         "Reading row group "
                         + context(
@@ -430,6 +448,9 @@ class Importer(SqlServerIOBase):
                     )
             else:
                 for rg_idx in range(total_rg):
+                    self.mem_gate.check(
+                        f"read_row_group file={filename} rg={rg_idx + 1}/{total_rg}"
+                    )
                     logger.debug(
                         "Reading row group "
                         + context(

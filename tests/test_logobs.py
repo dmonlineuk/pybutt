@@ -23,6 +23,7 @@ from pybutt.core.base import SqlServerIOBase
 from pybutt.core.config import SqlConfig, TransactionMode
 from pybutt.core.logobs import (
     LOGGER_NAME,
+    MemoryGate,
     MemoryHeartbeat,
     WorkerMonitor,
     _human_bytes,
@@ -361,6 +362,39 @@ def test_worker_monitor_disabled_when_zero_interval():
     with monitor:
         time.sleep(0.05)
     assert monitor._thread is None
+
+
+def test_memory_gate_noop_when_disabled():
+    gate = MemoryGate(threshold_pct=0)
+    assert gate.check("test") == 0.0
+
+
+def test_memory_gate_noop_when_below_threshold():
+    gate = MemoryGate(threshold_pct=99.9)
+    assert gate.check("test") == 0.0
+
+
+def test_memory_gate_logs_warning_when_triggered(caplog):
+    pybutt_logger = logging.getLogger(LOGGER_NAME)
+    pybutt_logger.addHandler(caplog.handler)
+    pybutt_logger.setLevel(logging.WARNING)
+
+    # threshold=1% means it will always trigger (system is always >1%)
+    gate = MemoryGate(threshold_pct=1.0, sleep_seconds=0.05, max_wait=0.1)
+    waited = gate.check("unit_test")
+
+    assert waited > 0
+    pressure_msgs = [
+        r.message for r in caplog.records if "Memory pressure" in r.message
+    ]
+    assert pressure_msgs, "expected a throttle warning"
+    assert "unit_test" in pressure_msgs[0]
+
+
+def test_memory_gate_respects_max_wait():
+    gate = MemoryGate(threshold_pct=1.0, sleep_seconds=0.05, max_wait=0.1)
+    waited = gate.check("timeout_test")
+    assert waited <= 0.2  # max_wait + one sleep cycle
 
 
 def test_importer_accepts_mem_heartbeat(tmp_path, mock_config):
