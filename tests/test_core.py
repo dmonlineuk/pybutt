@@ -280,15 +280,24 @@ def test_exporter_writes_manifest_version_2(monkeypatch, tmp_path):
     exporter.partition_count = 1
     exporter.export_partition = lambda n: "dbo_MyTable_part_00000.parquet"
 
+    class _AsyncResult:
+        def __init__(self, value):
+            self._value = value
+
+        def get(self):
+            return self._value
+
     class DummyPool:
+        _pool = []
+
         def __enter__(self):
             return self
 
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def map(self, func, args):
-            return [func(arg) for arg in args]
+        def map_async(self, func, args):
+            return _AsyncResult([func(arg) for arg in args])
 
     class DummyContext:
         def Pool(self, count, **kwargs):

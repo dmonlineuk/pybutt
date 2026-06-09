@@ -12,6 +12,7 @@ Covers:
 """
 
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
@@ -23,6 +24,7 @@ from pybutt.core.config import SqlConfig, TransactionMode
 from pybutt.core.logobs import (
     LOGGER_NAME,
     MemoryHeartbeat,
+    WorkerMonitor,
     _human_bytes,
     configure_logging,
     context,
@@ -319,6 +321,46 @@ def test_memory_heartbeat_includes_sys_mem(caplog):
     assert heartbeats, "expected at least one heartbeat line"
     assert "sys_pct=" in heartbeats[0]
     assert "sys_avail=" in heartbeats[0]
+
+
+def test_worker_monitor_logs_alive(caplog):
+    pybutt_logger = logging.getLogger(LOGGER_NAME)
+    pybutt_logger.addHandler(caplog.handler)
+    pybutt_logger.setLevel(logging.DEBUG)
+
+    # Monitor our own PID
+    with WorkerMonitor([os.getpid()], interval=0.05):
+        time.sleep(0.2)
+
+    health_msgs = [r.message for r in caplog.records if "Worker health" in r.message]
+    assert health_msgs, "expected at least one worker health line"
+    assert f"pid={os.getpid()}" in health_msgs[0]
+    assert "status=alive" in health_msgs[0]
+
+
+def test_worker_monitor_detects_vanished(caplog):
+    pybutt_logger = logging.getLogger(LOGGER_NAME)
+    pybutt_logger.addHandler(caplog.handler)
+    pybutt_logger.setLevel(logging.WARNING)
+
+    # Use a PID that doesn't exist
+    fake_pid = 999999
+    with WorkerMonitor([fake_pid], interval=0.05):
+        time.sleep(0.2)
+
+    vanished_msgs = [
+        r.message for r in caplog.records if "Worker vanished" in r.message
+    ]
+    assert vanished_msgs, "expected at least one worker vanished line"
+    assert f"pid={fake_pid}" in vanished_msgs[0]
+    assert "GONE" in vanished_msgs[0]
+
+
+def test_worker_monitor_disabled_when_zero_interval():
+    monitor = WorkerMonitor([os.getpid()], interval=0)
+    with monitor:
+        time.sleep(0.05)
+    assert monitor._thread is None
 
 
 def test_importer_accepts_mem_heartbeat(tmp_path, mock_config):

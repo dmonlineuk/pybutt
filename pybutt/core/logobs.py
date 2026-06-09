@@ -189,3 +189,93 @@ class MemoryHeartbeat:
             log.info(
                 "Memory heartbeat " + context(unit=self.unit, **extra, **mem_fields())
             )
+
+
+class WorkerMonitor:
+    """Monitor child worker processes from the parent and log their RSS.
+
+    Runs a daemon thread that polls each worker PID via ``psutil``. When a
+    worker disappears (e.g. OOM-killed by SIGKILL), the monitor logs the last
+    known RSS and system memory state so the operator has a breadcrumb trail
+    even though the child had no chance to log anything itself.
+
+    Use as a context manager. A no-op when ``interval <= 0``.
+    """
+
+    def __init__(self, pids: list[int], interval: float):
+        self.interval = interval or 0
+        self._pids = list(pids)
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._last_rss: dict[int, int] = {}
+
+    def __enter__(self) -> "WorkerMonitor":
+        if self.interval > 0 and self._pids:
+            self._thread = threading.Thread(
+                target=self._run, name="worker-monitor", daemon=True
+            )
+            self._thread.start()
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self.interval + 1)
+        return False
+
+    def _run(self) -> None:
+        log = get_logger("monitor")
+        procs: dict[int, psutil.Process] = {}
+        for pid in self._pids:
+            try:
+                procs[pid] = psutil.Process(pid)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        gone: set[int] = set()
+
+        while not self._stop.wait(self.interval):
+            sys_fields = sys_mem_fields()
+            for pid in self._pids:
+                if pid in gone:
+                    continue
+                proc = procs.get(pid)
+                if proc is None:
+                    gone.add(pid)
+                    log.warning(
+                        "Worker vanished "
+                        + context(
+                            pid=pid,
+                            last_rss=_human_bytes(self._last_rss.get(pid, 0)),
+                            status="GONE",
+                            **sys_fields,
+                        )
+                        + " — likely OOM-killed"
+                    )
+                    continue
+                try:
+                    rss = proc.memory_info().rss
+                    self._last_rss[pid] = rss
+                    log.debug(
+                        "Worker health "
+                        + context(
+                            pid=pid,
+                            rss=_human_bytes(rss),
+                            status="alive",
+                            **sys_fields,
+                        )
+                    )
+                except psutil.NoSuchProcess:
+                    gone.add(pid)
+                    log.warning(
+                        "Worker vanished "
+                        + context(
+                            pid=pid,
+                            last_rss=_human_bytes(self._last_rss.get(pid, 0)),
+                            status="GONE",
+                            **sys_fields,
+                        )
+                        + " — likely OOM-killed"
+                    )
+                except (psutil.AccessDenied, Exception):
+                    pass
