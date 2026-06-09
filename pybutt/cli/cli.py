@@ -7,6 +7,7 @@ from pathlib import Path
 import typer
 
 from pybutt.core.config import (
+    DEFAULT_MEM_HEARTBEAT,
     SqlConfig,
     TransactionMode,
 )
@@ -245,9 +246,12 @@ def export(
         case_sensitive=False,
     ),
     mem_heartbeat: float = typer.Option(  # noqa: B008
-        0,
+        DEFAULT_MEM_HEARTBEAT,
         "--mem-heartbeat",
-        help="Log process memory (RSS) every N seconds. 0 disables (default).",
+        help=(
+            "Log process memory (RSS + system %%) every N seconds. "
+            f"Default: {DEFAULT_MEM_HEARTBEAT}s. Set to 0 to disable."
+        ),
         min=0,
     ),
     verbose: bool = typer.Option(  # noqa: B008
@@ -440,9 +444,12 @@ def import_data(
         ),
     ),
     mem_heartbeat: float = typer.Option(  # noqa: B008
-        0,
+        DEFAULT_MEM_HEARTBEAT,
         "--mem-heartbeat",
-        help="Log process memory (RSS) every N seconds. 0 disables (default).",
+        help=(
+            "Log process memory (RSS + system %%) every N seconds. "
+            f"Default: {DEFAULT_MEM_HEARTBEAT}s. Set to 0 to disable."
+        ),
         min=0,
     ),
 ) -> None:
@@ -520,21 +527,13 @@ def merge(
         1_048_576, "--rowgroup-size", "-R", help="Rowgroup size for output."
     ),
     # SQL merge options (target)
-    server: str | None = typer.Option(
-        None, "--server", "-s", help="SQL Server host."
-    ),  # noqa: B008
+    server: str | None = typer.Option(None, "--server", "-s", help="SQL Server host."),  # noqa: B008
     database: str | None = typer.Option(  # noqa: B008
         None, "--database", "-d", help="Target database."
     ),
-    schema: str | None = typer.Option(
-        None, "--schema", "-S", help="Target schema."
-    ),  # noqa: B008
-    table: str | None = typer.Option(
-        None, "--table", "-t", help="Target table."
-    ),  # noqa: B008
-    trusted_connection: bool = typer.Option(
-        False, "--trusted-connection", "-T"
-    ),  # noqa: B008
+    schema: str | None = typer.Option(None, "--schema", "-S", help="Target schema."),  # noqa: B008
+    table: str | None = typer.Option(None, "--table", "-t", help="Target table."),  # noqa: B008
+    trusted_connection: bool = typer.Option(False, "--trusted-connection", "-T"),  # noqa: B008
     username: str | None = typer.Option(None, "--username", "-u"),  # noqa: B008
     password: str | None = typer.Option(None, "--password", "-p"),  # noqa: B008
     driver: str = typer.Option(  # noqa: B008
@@ -619,9 +618,7 @@ def merge(
 @app.command("inspect")
 def inspect_command(
     manifest: Path = typer.Argument(..., help="Path to manifest.json"),  # noqa: B008
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Show column details"
-    ),  # noqa: B008
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show column details"),  # noqa: B008
 ):
     """
     Inspect parquet files listed in a manifest.

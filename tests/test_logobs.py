@@ -30,6 +30,7 @@ from pybutt.core.logobs import (
     init_worker_logging,
     mem_fields,
     rss_bytes,
+    sys_mem_fields,
 )
 from pybutt.io.importer import Importer
 
@@ -249,9 +250,19 @@ def test_rss_bytes_is_positive_and_tracks_peak():
     assert second >= first
     del blob
     fields = mem_fields()
-    assert set(fields) == {"rss", "peak"}
+    assert {"rss", "peak", "sys_pct", "sys_avail"} <= set(fields)
     assert fields["rss"].endswith(("B", "KB", "MB", "GB"))
     assert fields["peak"].endswith(("B", "KB", "MB", "GB"))
+    assert fields["sys_pct"].endswith("%")
+    assert fields["sys_avail"].endswith(("B", "KB", "MB", "GB"))
+
+
+def test_sys_mem_fields_returns_system_info():
+    fields = sys_mem_fields()
+    assert "sys_pct" in fields
+    assert "sys_avail" in fields
+    assert fields["sys_pct"].endswith("%")
+    assert fields["sys_avail"].endswith(("B", "KB", "MB", "GB"))
 
 
 def test_memory_heartbeat_disabled_starts_no_thread():
@@ -277,6 +288,37 @@ def test_memory_heartbeat_emits_and_stops(caplog):
     assert heartbeats, "expected at least one heartbeat line"
     assert "unit=import" in heartbeats[0]
     assert "rss=" in heartbeats[0] and "peak=" in heartbeats[0]
+
+
+def test_memory_heartbeat_includes_progress(caplog):
+    pybutt_logger = logging.getLogger(LOGGER_NAME)
+    pybutt_logger.addHandler(caplog.handler)
+    pybutt_logger.setLevel(logging.INFO)
+
+    progress = {"rows_buffered": 0}
+    hb = MemoryHeartbeat(0.05, unit="export", progress=progress)
+    with hb:
+        progress["rows_buffered"] = 42_000
+        time.sleep(0.2)
+
+    heartbeats = [r.message for r in caplog.records if "Memory heartbeat" in r.message]
+    assert heartbeats, "expected at least one heartbeat line"
+    assert any("rows_buffered=42000" in m for m in heartbeats)
+
+
+def test_memory_heartbeat_includes_sys_mem(caplog):
+    pybutt_logger = logging.getLogger(LOGGER_NAME)
+    pybutt_logger.addHandler(caplog.handler)
+    pybutt_logger.setLevel(logging.INFO)
+
+    hb = MemoryHeartbeat(0.05, unit="import")
+    with hb:
+        time.sleep(0.2)
+
+    heartbeats = [r.message for r in caplog.records if "Memory heartbeat" in r.message]
+    assert heartbeats, "expected at least one heartbeat line"
+    assert "sys_pct=" in heartbeats[0]
+    assert "sys_avail=" in heartbeats[0]
 
 
 def test_importer_accepts_mem_heartbeat(tmp_path, mock_config):

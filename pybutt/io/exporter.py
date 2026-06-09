@@ -9,6 +9,7 @@ import pyodbc
 
 from pybutt.core.base import SqlServerIOBase
 from pybutt.core.config import (
+    DEFAULT_MEM_HEARTBEAT,
     SqlConfig,
     quote_identifier,
     resolve_engine_default,
@@ -50,7 +51,7 @@ class Exporter(SqlServerIOBase):
         engine="duckdb",
         manifest_filename: str | None = None,
         parameters: str | None = None,
-        mem_heartbeat: float = 0,
+        mem_heartbeat: float = DEFAULT_MEM_HEARTBEAT,
     ):
         super().__init__(config)
 
@@ -265,6 +266,7 @@ class Exporter(SqlServerIOBase):
     def _write_parquet_from_record_batches(self, reader, filepath, filename):
         try:
             schema = reader.schema
+            rg_written = 0
             with pq.ParquetWriter(
                 str(filepath.as_posix()), schema, compression="snappy"
             ) as writer:
@@ -283,6 +285,18 @@ class Exporter(SqlServerIOBase):
                         chunk = buffered_table.slice(0, self.rowgroup_size)
                         writer.write_table(chunk, row_group_size=self.rowgroup_size)
                         buffered_table = buffered_table.slice(self.rowgroup_size)
+                        rg_written += 1
+                        logger.debug(
+                            "Flushed rowgroup "
+                            + context(
+                                file=filename,
+                                rg=rg_written,
+                                buffered=(
+                                    buffered_table.num_rows if buffered_table else 0
+                                ),
+                                **mem_fields(),
+                            )
+                        )
 
                 if buffered_table is None:
                     writer.write_table(pa.Table.from_batches([], schema=schema))
@@ -351,6 +365,8 @@ class Exporter(SqlServerIOBase):
             str(filepath.as_posix()), target_schema, compression="snappy"
         ) as writer:
             buffered_rows = list(first_rows)
+            rg_written = 0
+            total_fetched = len(first_rows)
 
             while True:
                 if len(buffered_rows) >= self.rowgroup_size:
@@ -360,12 +376,34 @@ class Exporter(SqlServerIOBase):
                         row_group_size=self.rowgroup_size,
                     )
                     buffered_rows = buffered_rows[self.rowgroup_size :]
+                    rg_written += 1
+                    logger.debug(
+                        "Flushed rowgroup "
+                        + context(
+                            file=filename,
+                            rg=rg_written,
+                            buffered=len(buffered_rows),
+                            fetched=total_fetched,
+                            **mem_fields(),
+                        )
+                    )
                     continue
 
                 rows = cur.fetchmany(fetch_size)
                 if not rows:
                     break
                 buffered_rows.extend(rows)
+                total_fetched += len(rows)
+                logger.debug(
+                    "Fetched batch "
+                    + context(
+                        file=filename,
+                        rows=len(rows),
+                        buffered=len(buffered_rows),
+                        total_fetched=total_fetched,
+                        **mem_fields(),
+                    )
+                )
 
             if buffered_rows:
                 writer.write_table(

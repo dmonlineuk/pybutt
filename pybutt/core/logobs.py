@@ -114,8 +114,25 @@ def peak_rss_bytes() -> int:
     return _peak_rss
 
 
+def sys_mem_fields() -> dict[str, str]:
+    """System-wide memory fields for :func:`context`.
+
+    Returns ``{"sys_pct": "78%", "sys_avail": "4.2GB"}`` so log lines show
+    how close the *machine* is to the OOM-kill threshold — not just this
+    process's own RSS.
+    """
+    try:
+        vm = psutil.virtual_memory()
+        return {
+            "sys_pct": f"{vm.percent:.0f}%",
+            "sys_avail": _human_bytes(vm.available),
+        }
+    except Exception:
+        return {}
+
+
 def mem_fields() -> dict[str, str]:
-    """RSS fields for :func:`context`: ``{"rss": "1.8GB", "peak": "2.1GB"}``.
+    """RSS + system-wide memory fields for :func:`context`.
 
     Splat into ``context`` at boundary log points so the last line before an
     OOM-kill shows the memory trend and exactly where it died, e.g.::
@@ -123,7 +140,11 @@ def mem_fields() -> dict[str, str]:
         context(file=fn, rows=n, **mem_fields())
     """
     rss = rss_bytes()
-    return {"rss": _human_bytes(rss), "peak": _human_bytes(_peak_rss)}
+    return {
+        "rss": _human_bytes(rss),
+        "peak": _human_bytes(_peak_rss),
+        **sys_mem_fields(),
+    }
 
 
 class MemoryHeartbeat:
@@ -135,8 +156,14 @@ class MemoryHeartbeat:
     it must be entered inside the worker (where the memory actually lives).
     """
 
-    def __init__(self, interval: float, unit: str | None = None):
+    def __init__(
+        self,
+        interval: float,
+        unit: str | None = None,
+        progress: dict[str, object] | None = None,
+    ):
         self.interval = interval or 0
+        self.progress = progress
         self.unit = unit
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -158,4 +185,7 @@ class MemoryHeartbeat:
     def _run(self) -> None:
         log = get_logger("mem")
         while not self._stop.wait(self.interval):
-            log.info("Memory heartbeat " + context(unit=self.unit, **mem_fields()))
+            extra = dict(self.progress) if self.progress else {}
+            log.info(
+                "Memory heartbeat " + context(unit=self.unit, **extra, **mem_fields())
+            )
