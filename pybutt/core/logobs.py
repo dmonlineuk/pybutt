@@ -13,6 +13,7 @@ Library/API users who want PyButt's formatted output should call
 
 import logging
 import threading
+import time as _time
 
 import psutil
 
@@ -279,3 +280,75 @@ class WorkerMonitor:
                     )
                 except (psutil.AccessDenied, Exception):
                     pass
+
+
+class MemoryGate:
+    """Cooperative throttle: sleep the caller when system memory is high.
+
+    Call :meth:`check` at natural pause points in hot loops (before a
+    ``fetchmany``, ``read_row_group``, etc.). When system memory exceeds
+    *threshold_pct*, the caller sleeps in increments of *sleep_seconds*
+    until memory drops or *max_wait* is exhausted.
+
+    A no-op when ``threshold_pct <= 0``.
+    """
+
+    def __init__(
+        self,
+        threshold_pct: float = 0.0,
+        sleep_seconds: float = 5.0,
+        max_wait: float = 300.0,
+    ):
+        self.threshold_pct = threshold_pct
+        self.sleep_seconds = sleep_seconds
+        self.max_wait = max_wait
+        self._log = get_logger("gate")
+        self._enabled = threshold_pct > 0
+
+    def check(self, context_msg: str = "") -> float:
+        """Block while system memory exceeds the threshold.
+
+        Returns the total seconds waited (0.0 if no throttling occurred).
+        """
+        if not self._enabled:
+            return 0.0
+
+        waited = 0.0
+        vm = psutil.virtual_memory()
+        if vm.percent <= self.threshold_pct:
+            return 0.0
+
+        self._log.warning(
+            "Memory pressure — throttling "
+            + context(
+                reason=context_msg or "gate",
+                threshold=f"{self.threshold_pct:.0f}%",
+                **mem_fields(),
+            )
+        )
+
+        while vm.percent > self.threshold_pct and waited < self.max_wait:
+            _time.sleep(self.sleep_seconds)
+            waited += self.sleep_seconds
+            vm = psutil.virtual_memory()
+            self._log.info(
+                "Throttle wait "
+                + context(
+                    waited=f"{waited:.0f}s",
+                    sys_pct=f"{vm.percent:.0f}%",
+                    threshold=f"{self.threshold_pct:.0f}%",
+                    sys_avail=_human_bytes(vm.available),
+                )
+            )
+
+        if waited > 0:
+            self._log.info(
+                "Throttle released "
+                + context(
+                    total_waited=f"{waited:.0f}s",
+                    sys_pct=f"{vm.percent:.0f}%",
+                    sys_avail=_human_bytes(vm.available),
+                )
+            )
+
+        return waited

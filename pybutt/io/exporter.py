@@ -10,6 +10,9 @@ import pyodbc
 from pybutt.core.base import SqlServerIOBase
 from pybutt.core.config import (
     DEFAULT_MEM_HEARTBEAT,
+    DEFAULT_MEM_MAX_WAIT,
+    DEFAULT_MEM_SLEEP,
+    DEFAULT_MEM_THRESHOLD,
     SqlConfig,
     quote_identifier,
     resolve_engine_default,
@@ -18,6 +21,7 @@ from pybutt.core.config import (
     validate_parameters,
 )
 from pybutt.core.logobs import (
+    MemoryGate,
     MemoryHeartbeat,
     WorkerMonitor,
     context,
@@ -53,10 +57,14 @@ class Exporter(SqlServerIOBase):
         manifest_filename: str | None = None,
         parameters: str | None = None,
         mem_heartbeat: float = DEFAULT_MEM_HEARTBEAT,
+        mem_threshold: float = DEFAULT_MEM_THRESHOLD,
+        mem_sleep: float = DEFAULT_MEM_SLEEP,
+        mem_max_wait: float = DEFAULT_MEM_MAX_WAIT,
     ):
         super().__init__(config)
 
         self.mem_heartbeat = mem_heartbeat
+        self.mem_gate = MemoryGate(mem_threshold, mem_sleep, mem_max_wait)
 
         self.pk_column = validate_identifier(pk_column) if pk_column else None
         self.columns = [validate_identifier(c) for c in columns] if columns else None
@@ -273,6 +281,7 @@ class Exporter(SqlServerIOBase):
             ) as writer:
                 buffered_table = None
                 for batch in reader:
+                    self.mem_gate.check(f"record_batch file={filename}")
                     table = pa.Table.from_batches([batch])
                     if buffered_table is None:
                         buffered_table = table
@@ -390,6 +399,7 @@ class Exporter(SqlServerIOBase):
                     )
                     continue
 
+                self.mem_gate.check(f"fetchmany file={filename}")
                 rows = cur.fetchmany(fetch_size)
                 if not rows:
                     break
