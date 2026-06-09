@@ -7,6 +7,7 @@ from pathlib import Path
 import typer
 
 from pybutt.core.config import (
+    DEFAULT_MEM_COOLDOWN,
     DEFAULT_MEM_HEARTBEAT,
     DEFAULT_MEM_MAX_WAIT,
     DEFAULT_MEM_SLEEP,
@@ -288,6 +289,15 @@ def export(
         ),
         min=0,
     ),
+    mem_cooldown: float = typer.Option(  # noqa: B008
+        DEFAULT_MEM_COOLDOWN,
+        "--mem-cooldown",
+        help=(
+            "Seconds after a throttle event before re-checking. Prevents "
+            f"the gate from serialising workers. Default: {DEFAULT_MEM_COOLDOWN}s."
+        ),
+        min=0,
+    ),
     verbose: bool = typer.Option(  # noqa: B008
         False,
         "--verbose",
@@ -341,6 +351,7 @@ def export(
             mem_threshold=mem_threshold,
             mem_sleep=mem_sleep,
             mem_max_wait=mem_max_wait,
+            mem_cooldown=mem_cooldown,
         )
         exporter.perform_work()
     except PyButtError as exc:
@@ -525,6 +536,15 @@ def import_data(
         ),
         min=0,
     ),
+    mem_cooldown: float = typer.Option(  # noqa: B008
+        DEFAULT_MEM_COOLDOWN,
+        "--mem-cooldown",
+        help=(
+            "Seconds after a throttle event before re-checking. Prevents "
+            f"the gate from serialising workers. Default: {DEFAULT_MEM_COOLDOWN}s."
+        ),
+        min=0,
+    ),
 ) -> None:
     """Import Parquet files into a SQL Server table.
 
@@ -571,6 +591,7 @@ def import_data(
             mem_threshold=mem_threshold,
             mem_sleep=mem_sleep,
             mem_max_wait=mem_max_wait,
+            mem_cooldown=mem_cooldown,
         )
         importer.perform_work()
     except PyButtError as exc:

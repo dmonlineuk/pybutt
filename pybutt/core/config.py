@@ -26,6 +26,10 @@ DEFAULT_MEM_THRESHOLD: float = 85.0
 DEFAULT_MEM_SLEEP: float = 5.0
 DEFAULT_MEM_MAX_WAIT: float = 300.0
 
+# Cooldown seconds after a throttle event before the gate re-checks. Prevents
+# the gate from firing on every loop iteration and serialising workers.
+DEFAULT_MEM_COOLDOWN: float = 30.0
+
 # Per-engine default overrides, keyed by tunable name then engine. Only values
 # that diverge from the generic fallback are listed; everything else falls back.
 # See docs/defaults.md for the rationale behind each entry.
