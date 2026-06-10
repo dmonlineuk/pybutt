@@ -366,6 +366,11 @@ class MemoryGate:
     *threshold_pct*, the caller sleeps in increments of *sleep_seconds*
     until memory drops or *max_wait* is exhausted.
 
+    After a throttle event (or max_wait timeout), a cooldown of
+    *cooldown_seconds* prevents the gate from re-triggering on every
+    subsequent loop iteration — allowing workers to make real progress
+    between checks.
+
     A no-op when ``threshold_pct <= 0``.
     """
 
@@ -374,19 +379,28 @@ class MemoryGate:
         threshold_pct: float = 0.0,
         sleep_seconds: float = 5.0,
         max_wait: float = 300.0,
+        cooldown_seconds: float = 30.0,
     ):
         self.threshold_pct = threshold_pct
         self.sleep_seconds = sleep_seconds
         self.max_wait = max_wait
+        self.cooldown_seconds = cooldown_seconds
         self._log = get_logger("gate")
         self._enabled = threshold_pct > 0
+        self._last_release: float = 0.0
 
     def check(self, context_msg: str = "") -> float:
         """Block while system memory exceeds the threshold.
 
         Returns the total seconds waited (0.0 if no throttling occurred).
+        Skips the check entirely if still within the cooldown window from
+        the last throttle event.
         """
         if not self._enabled:
+            return 0.0
+
+        now = _time.monotonic()
+        if now - self._last_release < self.cooldown_seconds:
             return 0.0
 
         waited = 0.0
@@ -427,4 +441,5 @@ class MemoryGate:
                 )
             )
 
+        self._last_release = _time.monotonic()
         return waited

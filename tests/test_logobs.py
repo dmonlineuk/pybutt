@@ -399,6 +399,18 @@ def test_memory_gate_respects_max_wait():
     assert waited <= 0.2  # max_wait + one sleep cycle
 
 
+def test_memory_gate_cooldown_skips_recheck():
+    gate = MemoryGate(
+        threshold_pct=1.0, sleep_seconds=0.05, max_wait=0.1, cooldown_seconds=60.0
+    )
+    # First check triggers (system is always >1%)
+    waited1 = gate.check("first")
+    assert waited1 > 0
+    # Second check should be skipped due to cooldown
+    waited2 = gate.check("second")
+    assert waited2 == 0.0
+
+
 def test_log_memory_budget_emits_info(caplog):
     pybutt_logger = logging.getLogger(LOGGER_NAME)
     pybutt_logger.addHandler(caplog.handler)

@@ -42,6 +42,7 @@ class DummyExporter:
         mem_threshold=0,
         mem_sleep=5.0,
         mem_max_wait=300.0,
+        mem_cooldown=30.0,
     ):
         self.config = config
         self.output_path = Path(output_path)
@@ -58,6 +59,7 @@ class DummyExporter:
         self.mem_threshold = mem_threshold
         self.mem_sleep = mem_sleep
         self.mem_max_wait = mem_max_wait
+        self.mem_cooldown = mem_cooldown
         DummyExporter.last_instance = self
 
     def perform_work(self):
@@ -83,6 +85,7 @@ class DummyImporter:
         mem_threshold=0,
         mem_sleep=5.0,
         mem_max_wait=300.0,
+        mem_cooldown=30.0,
     ):
         self.config = config
         self.input_path = Path(input_path)
@@ -98,6 +101,7 @@ class DummyImporter:
         self.mem_threshold = mem_threshold
         self.mem_sleep = mem_sleep
         self.mem_max_wait = mem_max_wait
+        self.mem_cooldown = mem_cooldown
         DummyImporter.last_instance = self
 
     def perform_work(self):

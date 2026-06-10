@@ -9,6 +9,7 @@ import pyodbc
 
 from pybutt.core.base import SqlServerIOBase
 from pybutt.core.config import (
+    DEFAULT_MEM_COOLDOWN,
     DEFAULT_MEM_HEARTBEAT,
     DEFAULT_MEM_MAX_WAIT,
     DEFAULT_MEM_SLEEP,
@@ -62,11 +63,12 @@ class Exporter(SqlServerIOBase):
         mem_threshold: float = DEFAULT_MEM_THRESHOLD,
         mem_sleep: float = DEFAULT_MEM_SLEEP,
         mem_max_wait: float = DEFAULT_MEM_MAX_WAIT,
+        mem_cooldown: float = DEFAULT_MEM_COOLDOWN,
     ):
         super().__init__(config)
 
         self.mem_heartbeat = mem_heartbeat
-        self.mem_gate = MemoryGate(mem_threshold, mem_sleep, mem_max_wait)
+        self.mem_gate = MemoryGate(mem_threshold, mem_sleep, mem_max_wait, mem_cooldown)
 
         self.pk_column = validate_identifier(pk_column) if pk_column else None
         self.columns = [validate_identifier(c) for c in columns] if columns else None
