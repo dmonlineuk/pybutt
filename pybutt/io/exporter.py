@@ -64,6 +64,7 @@ class Exporter(SqlServerIOBase):
         mem_sleep: float = DEFAULT_MEM_SLEEP,
         mem_max_wait: float = DEFAULT_MEM_MAX_WAIT,
         mem_cooldown: float = DEFAULT_MEM_COOLDOWN,
+        rowgroups_per_file: int | None = None,
     ):
         super().__init__(config)
 
@@ -76,6 +77,14 @@ class Exporter(SqlServerIOBase):
 
         validate_engine(engine)
 
+        if rowgroups_per_file is not None and file_count != 1:
+            raise ConfigurationError(
+                "--rowgroups-per-file and --file-count are mutually exclusive"
+            )
+
+        if rowgroups_per_file is not None and rowgroups_per_file < 1:
+            raise ConfigurationError("rowgroups_per_file must be at least 1")
+
         if file_count < 1:
             raise ConfigurationError("file_count must be at least 1")
 
@@ -85,6 +94,7 @@ class Exporter(SqlServerIOBase):
         self.worker_count = worker_count
         self.file_count = file_count
         self.rowgroup_size = rowgroup_size
+        self.rowgroups_per_file = rowgroups_per_file
         self.engine = engine
         self.fetch_size = resolve_engine_default(
             "fetch_size",
@@ -143,7 +153,11 @@ class Exporter(SqlServerIOBase):
         if self.total_rows == 0:
             raise TableEmptyError("Table empty or not found")
 
-        self.partition_count = self.file_count
+        if self.rowgroups_per_file is not None:
+            rows_per_file = self.rowgroups_per_file * self.rowgroup_size
+            self.partition_count = m.ceil(self.total_rows / rows_per_file)
+        else:
+            self.partition_count = self.file_count
         self.chunk_size = m.ceil(self.total_rows / self.partition_count)
 
         logger.info(

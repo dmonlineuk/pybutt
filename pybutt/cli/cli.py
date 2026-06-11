@@ -212,11 +212,24 @@ def export(
         help="Number of worker processes used for export.",
         min=1,
     ),
-    file_count: int = typer.Option(  # noqa: B008
-        1,
+    file_count: int | None = typer.Option(  # noqa: B008
+        None,
         "--file-count",
         "-f",
-        help="Number of Parquet output files.",
+        help=(
+            "Number of Parquet output files. "
+            "Mutually exclusive with --rowgroups-per-file."
+        ),
+        min=1,
+    ),
+    rowgroups_per_file: int | None = typer.Option(  # noqa: B008
+        None,
+        "--rowgroups-per-file",
+        help=(
+            "Number of rowgroups per output file. The total file count is "
+            "derived from total_rows / (rowgroups_per_file × rowgroup_size). "
+            "Mutually exclusive with --file-count."
+        ),
         min=1,
     ),
     parameters: str | None = typer.Option(
@@ -334,6 +347,13 @@ def export(
         retries=retries,
     )
 
+    if file_count is not None and rowgroups_per_file is not None:
+        raise typer.BadParameter(
+            "--file-count and --rowgroups-per-file are mutually exclusive"
+        )
+
+    effective_file_count = file_count if file_count is not None else 1
+
     try:
         exporter = Exporter(
             config=config,
@@ -341,7 +361,7 @@ def export(
             pk_column=pk_column,
             columns=parse_columns(columns),
             worker_count=worker_count,
-            file_count=file_count,
+            file_count=effective_file_count,
             rowgroup_size=rowgroup_size,
             fetch_size=fetch_size,
             engine=engine.lower(),
@@ -352,6 +372,7 @@ def export(
             mem_sleep=mem_sleep,
             mem_max_wait=mem_max_wait,
             mem_cooldown=mem_cooldown,
+            rowgroups_per_file=rowgroups_per_file,
         )
         exporter.perform_work()
     except PyButtError as exc:
@@ -631,21 +652,13 @@ def merge(
         1_048_576, "--rowgroup-size", "-R", help="Rowgroup size for output."
     ),
     # SQL merge options (target)
-    server: str | None = typer.Option(
-        None, "--server", "-s", help="SQL Server host."
-    ),  # noqa: B008
+    server: str | None = typer.Option(None, "--server", "-s", help="SQL Server host."),  # noqa: B008
     database: str | None = typer.Option(  # noqa: B008
         None, "--database", "-d", help="Target database."
     ),
-    schema: str | None = typer.Option(
-        None, "--schema", "-S", help="Target schema."
-    ),  # noqa: B008
-    table: str | None = typer.Option(
-        None, "--table", "-t", help="Target table."
-    ),  # noqa: B008
-    trusted_connection: bool = typer.Option(
-        False, "--trusted-connection", "-T"
-    ),  # noqa: B008
+    schema: str | None = typer.Option(None, "--schema", "-S", help="Target schema."),  # noqa: B008
+    table: str | None = typer.Option(None, "--table", "-t", help="Target table."),  # noqa: B008
+    trusted_connection: bool = typer.Option(False, "--trusted-connection", "-T"),  # noqa: B008
     username: str | None = typer.Option(None, "--username", "-u"),  # noqa: B008
     password: str | None = typer.Option(None, "--password", "-p"),  # noqa: B008
     driver: str = typer.Option(  # noqa: B008
@@ -730,9 +743,7 @@ def merge(
 @app.command("inspect")
 def inspect_command(
     manifest: Path = typer.Argument(..., help="Path to manifest.json"),  # noqa: B008
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Show column details"
-    ),  # noqa: B008
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show column details"),  # noqa: B008
 ):
     """
     Inspect parquet files listed in a manifest.
