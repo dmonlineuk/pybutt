@@ -66,8 +66,7 @@ class SqlServerIOBase:
         if cfg.encrypt:
             parts.append("Encrypt=Yes")
 
-        # Add the PacketSize parameter
-        parts.append("PacketSize=32768")
+        parts.append(f"PacketSize={cfg.packet_size}")
 
         return parts
 

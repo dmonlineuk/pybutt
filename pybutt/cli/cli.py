@@ -12,6 +12,7 @@ from pybutt.core.config import (
     DEFAULT_MEM_MAX_WAIT,
     DEFAULT_MEM_SLEEP,
     DEFAULT_MEM_THRESHOLD,
+    DEFAULT_PACKET_SIZE,
     SqlConfig,
     TransactionMode,
 )
@@ -86,6 +87,7 @@ def build_sql_config(
     trust_cert: bool,
     encrypt: bool,
     retries: int,
+    packet_size: int = DEFAULT_PACKET_SIZE,
 ) -> SqlConfig:
     if not trusted_connection:
         if not username:
@@ -109,6 +111,7 @@ def build_sql_config(
         trust_cert=trust_cert,
         encrypt=encrypt,
         retries=retries,
+        packet_size=packet_size,
     )
 
 
@@ -192,6 +195,16 @@ def export(
         "-r",
         help="Number of retry attempts for transient SQL errors.",
         min=1,
+    ),
+    packet_size: int = typer.Option(  # noqa: B008
+        DEFAULT_PACKET_SIZE,
+        "--packet-size",
+        help=(
+            "TDS packet size in bytes (512\u201332767). "
+            f"Default: {DEFAULT_PACKET_SIZE} (max for encrypted connections)."
+        ),
+        min=512,
+        max=32767,
     ),
     pk_column: str | None = typer.Option(  # noqa: B008
         None,
@@ -345,6 +358,7 @@ def export(
         trust_cert=trust_cert,
         encrypt=encrypt,
         retries=retries,
+        packet_size=packet_size,
     )
 
     if file_count is not None and rowgroups_per_file is not None:
@@ -467,6 +481,16 @@ def import_data(
         "-r",
         help="Number of retry attempts for transient SQL errors.",
         min=1,
+    ),
+    packet_size: int = typer.Option(  # noqa: B008
+        DEFAULT_PACKET_SIZE,
+        "--packet-size",
+        help=(
+            "TDS packet size in bytes (512\u201332767). "
+            f"Default: {DEFAULT_PACKET_SIZE} (max for encrypted connections)."
+        ),
+        min=512,
+        max=32767,
     ),
     worker_count: int = typer.Option(  # noqa: B008
         1,
@@ -594,6 +618,7 @@ def import_data(
         trust_cert=trust_cert,
         encrypt=encrypt,
         retries=retries,
+        packet_size=packet_size,
     )
 
     try:
@@ -675,6 +700,16 @@ def merge(
     trust_cert: bool = typer.Option(False, "--trust-cert", "-c"),  # noqa: B008
     encrypt: bool = typer.Option(True, "--encrypt/--no-encrypt", "-e/-n"),  # noqa: B008
     retries: int = typer.Option(3, "--retries", "-r", min=1),  # noqa: B008
+    packet_size: int = typer.Option(  # noqa: B008
+        DEFAULT_PACKET_SIZE,
+        "--packet-size",
+        help=(
+            "TDS packet size in bytes (512–32767). "
+            f"Default: {DEFAULT_PACKET_SIZE} (max for encrypted connections)."
+        ),
+        min=512,
+        max=32767,
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),  # noqa: B008
 ) -> None:
     """Merge manifest entries according to manifest type."""
@@ -724,6 +759,7 @@ def merge(
             trust_cert=trust_cert,
             encrypt=encrypt,
             retries=retries,
+            packet_size=packet_size,
         )
 
         try:

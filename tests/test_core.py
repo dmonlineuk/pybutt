@@ -1000,3 +1000,59 @@ def test_connection_m_trusted_connection(monkeypatch):
     assert "Trusted_Connection=Yes" in conn_str
     assert "TrustServerCertificate=No" in conn_str
     assert "Encrypt=Yes" not in conn_str
+
+
+def test_connection_dsn_includes_default_packet_size():
+    config = SqlConfig(
+        server="myserver",
+        database="TestDb",
+        schema="dbo",
+        table="T",
+        username="u",
+        password="p",
+    )
+    base = SqlServerIOBase(config)
+    assert "PacketSize=16383" in base.dsn
+
+
+def test_connection_dsn_custom_packet_size():
+    config = SqlConfig(
+        server="myserver",
+        database="TestDb",
+        schema="dbo",
+        table="T",
+        username="u",
+        password="p",
+        packet_size=8192,
+    )
+    base = SqlServerIOBase(config)
+    assert "PacketSize=8192" in base.dsn
+
+
+def test_connection_m_includes_packet_size(monkeypatch):
+    config = SqlConfig(
+        server="myserver",
+        database="TestDb",
+        schema="dbo",
+        table="T",
+        username="u",
+        password="p",
+        packet_size=4096,
+    )
+
+    captured_conn_str = []
+
+    def mock_connect(conn_str):
+        captured_conn_str.append(conn_str)
+        mock_conn = MagicMock()
+        return mock_conn
+
+    import mssql_python
+
+    monkeypatch.setattr(mssql_python, "connect", mock_connect)
+
+    base = SqlServerIOBase(config)
+    base.connection_m(autocommit=False)
+
+    assert len(captured_conn_str) == 1
+    assert "PacketSize=4096" in captured_conn_str[0]

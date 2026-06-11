@@ -15,6 +15,7 @@ default is added or changed.
 | `--worker-count` | `1` | |
 | `--file-count` | `1` | |
 | `--retries` | `3` | |
+| `--packet-size` | `16383` | Max for encrypted connections (512–32767). |
 
 ### Import
 | Option | Default | Notes |
@@ -25,6 +26,7 @@ default is added or changed.
 | `--worker-count` | `1` | |
 | `--cci` | enabled | CCI on per-worker staging tables (multi-worker only). |
 | `--retries` | `3` | |
+| `--packet-size` | `16383` | Shared with export; see above. |
 
 Most defaults are engine-independent; `--batch-size` is **engine-aware** (it
 differs for `mssql-python`). An explicit value always overrides the default.
@@ -86,6 +88,9 @@ ignored by the `duckdb` engine, so any override would target `pyodbc`/
 
 ## Change log
 
+- _(unreleased)_ `--packet-size` added (default `16383`, valid 512–32767).
+  Sets the TDS `PacketSize` on all connection paths (pyodbc, mssql-python,
+  DuckDB ODBC scanner). Default is the encrypted-connection maximum.
 - _(unreleased)_ Engine-aware default mechanism implemented. Import
   `--batch-size` now defaults to `1048576` for the `mssql-python` engine
   (unchanged `1000` elsewhere). Export framework wired via `--fetch-size` with

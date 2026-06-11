@@ -30,6 +30,11 @@ DEFAULT_MEM_MAX_WAIT: float = 300.0
 # the gate from firing on every loop iteration and serialising workers.
 DEFAULT_MEM_COOLDOWN: float = 30.0
 
+# Default TDS packet size in bytes. 16383 is the maximum for encrypted
+# connections (SQL Server caps encrypted packets at this size). Valid range
+# for all drivers is 512–32767.
+DEFAULT_PACKET_SIZE: int = 16_383
+
 # Per-engine default overrides, keyed by tunable name then engine. Only values
 # that diverge from the generic fallback are listed; everything else falls back.
 # See docs/defaults.md for the rationale behind each entry.
@@ -136,6 +141,7 @@ class SqlConfig:
     trust_cert: bool = False
     encrypt: bool = True
     retries: int = 3
+    packet_size: int = DEFAULT_PACKET_SIZE
 
 
 if __name__ == "__main__":
