@@ -220,4 +220,8 @@ __marimo__/
 #### Added
 sandbox.ipynb
 ## for local testing
-*local.py
+TESTING.md
+test-export.sh
+test-import.sh
+test-merge.sh
+*.log

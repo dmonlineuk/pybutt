@@ -43,6 +43,7 @@ class DummyExporter:
         mem_sleep=5.0,
         mem_max_wait=300.0,
         mem_cooldown=30.0,
+        rowgroups_per_file=None,
     ):
         self.config = config
         self.output_path = Path(output_path)
@@ -60,6 +61,7 @@ class DummyExporter:
         self.mem_sleep = mem_sleep
         self.mem_max_wait = mem_max_wait
         self.mem_cooldown = mem_cooldown
+        self.rowgroups_per_file = rowgroups_per_file
         DummyExporter.last_instance = self
 
     def perform_work(self):
@@ -209,6 +211,98 @@ def test_export_command_parses_engine_option(monkeypatch, tmp_path):
     assert result.exit_code == 0
     exporter = DummyExporter.last_instance
     assert exporter.engine == "pyodbc"
+
+
+def test_export_command_parses_rowgroups_per_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "Exporter", DummyExporter)
+
+    output_dir = tmp_path / "out"
+    result = runner.invoke(
+        cli.app,
+        [
+            "export",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--output-path",
+            str(output_dir),
+            "--trusted-connection",
+            "--rowgroups-per-file",
+            "5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    exporter = DummyExporter.last_instance
+    assert exporter.rowgroups_per_file == 5
+    assert exporter.file_count == 1
+
+
+def test_export_command_rejects_both_file_count_and_rowgroups_per_file(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(cli, "Exporter", DummyExporter)
+
+    output_dir = tmp_path / "out"
+    result = runner.invoke(
+        cli.app,
+        [
+            "export",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--output-path",
+            str(output_dir),
+            "--trusted-connection",
+            "--file-count",
+            "4",
+            "--rowgroups-per-file",
+            "5",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "mutually exclusive" in result.output
+
+
+def test_export_command_defaults_file_count_1_when_neither_specified(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(cli, "Exporter", DummyExporter)
+
+    output_dir = tmp_path / "out"
+    result = runner.invoke(
+        cli.app,
+        [
+            "export",
+            "--server",
+            "localhost",
+            "--database",
+            "TestDb",
+            "--schema",
+            "dbo",
+            "--table",
+            "MyTable",
+            "--output-path",
+            str(output_dir),
+            "--trusted-connection",
+        ],
+    )
+
+    assert result.exit_code == 0
+    exporter = DummyExporter.last_instance
+    assert exporter.file_count == 1
+    assert exporter.rowgroups_per_file is None
 
 
 def test_export_command_manifest_version_is_2(monkeypatch, tmp_path):
