@@ -221,7 +221,13 @@ class Importer(SqlServerIOBase):
     def _import_file_impl(
         self, filepath, filename, start, target_table: str | None = None
     ):
-        """Implementation of file import with transaction management."""
+        """Implementation of file import with transaction management.
+
+        Uses a producer-consumer pattern: a reader thread pre-reads
+        rowgroups/batches into a bounded queue while the caller thread
+        pushes rows to SQL Server via ``cur.executemany``.  This keeps
+        the TDS pipe fed and reduces ASYNC_NETWORK_IO waits.
+        """
         # For ROW mode, use autocommit; for others, manual commit control
         with self.connection_p(
             autocommit=(self.transaction_mode == TransactionMode.ROW)
@@ -235,64 +241,57 @@ class Importer(SqlServerIOBase):
                 )
 
                 total_rows = 0
+                buf: queue.Queue[_QueueItem | object] = queue.Queue(maxsize=2)
+                cancel = threading.Event()
 
-                total_rg = parquet_file.num_row_groups
-                for rg_idx in range(total_rg):
-                    self.mem_gate.check(
-                        f"read_row_group file={filename} rg={rg_idx + 1}/{total_rg}"
-                    )
-                    logger.debug(
-                        "Reading row group "
-                        + context(
-                            file=filename,
-                            rg=f"{rg_idx + 1}/{total_rg}",
-                            **mem_fields(),
-                        )
-                    )
-                    table = parquet_file.read_row_group(rg_idx)
+                reader = threading.Thread(
+                    target=self._parquet_reader_thread,
+                    args=(parquet_file, buf, filename, cancel),
+                    daemon=True,
+                    name=f"pyodbc-reader-{filename}",
+                )
+                reader.start()
 
-                    if self.transaction_mode == TransactionMode.ROWGROUP:
-                        rows_in_rg = self._import_rowgroup_with_retry(
-                            c,
-                            cur,
-                            table,
-                            insert_sql,
-                            filename,
-                            rg_idx,
-                            total_rg,
-                        )
-                        total_rows += rows_in_rg
-                    else:
-                        for batch_idx, batch in enumerate(
-                            table.to_batches(max_chunksize=self.batch_size)
-                        ):
-                            if self.transaction_mode == TransactionMode.BATCH:
-                                rows = self._rows_from_batch(batch)
-                                rows_in_batch = self._import_batch_with_retry(
-                                    c,
-                                    cur,
-                                    rows,
-                                    insert_sql,
-                                    filename,
-                                    rg=f"{rg_idx + 1}/{total_rg}",
-                                    batch=batch_idx,
-                                    offset=total_rows,
-                                )
-                                total_rows += rows_in_batch
-                            else:
-                                rows = self._rows_from_batch(batch)
-                                cur.executemany(insert_sql, rows)
-                                total_rows += len(rows)
+                try:
+                    while True:
+                        item = buf.get()
+                        if item is _SENTINEL:
+                            break
+                        if isinstance(item, Exception):
+                            raise item
+                        assert isinstance(item, _QueueItem)
 
-                        if self.transaction_mode != TransactionMode.BATCH:
-                            logger.debug(
-                                "Processed row group "
-                                + context(
-                                    file=filename,
-                                    rg=f"{rg_idx + 1}/{total_rg}",
-                                    **mem_fields(),
-                                )
+                        if self.transaction_mode == TransactionMode.ROWGROUP:
+                            rows_in_rg = self._import_rowgroup_with_retry(
+                                c,
+                                cur,
+                                item.rows,
+                                insert_sql,
+                                filename,
+                                rg=item.rg_label,
                             )
+                            total_rows += rows_in_rg
+                        elif self.transaction_mode == TransactionMode.BATCH:
+                            rows_in_batch = self._import_batch_with_retry(
+                                c,
+                                cur,
+                                item.rows,
+                                insert_sql,
+                                filename,
+                                rg=item.rg_label,
+                                batch=item.batch_idx,
+                                offset=total_rows,
+                            )
+                            total_rows += rows_in_batch
+                        else:
+                            # FILE / ROW modes — no per-item commit
+                            cur.executemany(insert_sql, item.rows)
+                            total_rows += item.row_count
+                except BaseException:
+                    cancel.set()
+                    raise
+                finally:
+                    reader.join(timeout=5)
 
                 # Commit after entire file if in FILE mode
                 if self.transaction_mode == TransactionMode.FILE:
@@ -407,10 +406,10 @@ class Importer(SqlServerIOBase):
                 )
 
     # ------------------------------------------------------------------
-    # mssql-python producer-consumer helpers
+    # producer-consumer helpers
     # ------------------------------------------------------------------
 
-    def _mssql_reader_thread(
+    def _parquet_reader_thread(
         self,
         parquet_file: pq.ParquetFile,
         buf: queue.Queue[_QueueItem | object],
@@ -498,7 +497,7 @@ class Importer(SqlServerIOBase):
             cancel = threading.Event()
 
             reader = threading.Thread(
-                target=self._mssql_reader_thread,
+                target=self._parquet_reader_thread,
                 args=(parquet_file, buf, filename, cancel),
                 daemon=True,
                 name=f"mssql-reader-{filename}",
@@ -710,24 +709,46 @@ class Importer(SqlServerIOBase):
                     ) from e
 
     def _import_rowgroup_with_retry(
-        self, c, cur, table_or_batch, insert_sql, filename, rg_idx, total_rg
+        self,
+        c,
+        cur,
+        table_or_batch,
+        insert_sql,
+        filename,
+        rg_idx=None,
+        total_rg=None,
+        *,
+        rg=None,
     ):
-        """Import a single row group with retry logic for ROWGROUP mode."""
-        rg = f"{rg_idx + 1}/{total_rg}"
+        """Import a single row group with retry logic for ROWGROUP mode.
+
+        ``table_or_batch`` may be a PyArrow Table, RecordBatch, or a
+        pre-converted ``list[tuple]`` of rows (from the reader thread).
+        Pass *rg* to supply a pre-formatted label; otherwise it is
+        derived from *rg_idx* / *total_rg*.
+        """
+        if rg is None:
+            rg = f"{rg_idx + 1}/{total_rg}"
+        is_rows = isinstance(table_or_batch, list)
         for attempt in range(self.config.retries):
             try:
                 total_rows = 0
-                to_batches = getattr(table_or_batch, "to_batches", None)
-                rowgroup_batches = (
-                    table_or_batch.to_batches(max_chunksize=self.batch_size)
-                    if callable(to_batches)
-                    else [table_or_batch]
-                )
-
-                for batch in rowgroup_batches:
-                    rows = rows_from_arrow(batch)
-                    cur.executemany(insert_sql, rows)
-                    total_rows += len(rows)
+                if is_rows:
+                    for i in range(0, len(table_or_batch), self.batch_size):
+                        chunk = table_or_batch[i : i + self.batch_size]
+                        cur.executemany(insert_sql, chunk)
+                        total_rows += len(chunk)
+                else:
+                    to_batches = getattr(table_or_batch, "to_batches", None)
+                    rowgroup_batches = (
+                        table_or_batch.to_batches(max_chunksize=self.batch_size)
+                        if callable(to_batches)
+                        else [table_or_batch]
+                    )
+                    for batch in rowgroup_batches:
+                        rows = rows_from_arrow(batch)
+                        cur.executemany(insert_sql, rows)
+                        total_rows += len(rows)
 
                 c.commit()
                 logger.debug("Processed row group " + context(file=filename, rg=rg))
