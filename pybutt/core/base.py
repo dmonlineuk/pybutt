@@ -66,6 +66,8 @@ class SqlServerIOBase:
         if cfg.encrypt:
             parts.append("Encrypt=Yes")
 
+        parts.append(f"PacketSize={cfg.packet_size}")
+
         return parts
 
     def build_dsn(self):

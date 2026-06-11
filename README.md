@@ -120,6 +120,7 @@ pybutt export \
 --trust-cert,           -c      Trust the SQL Server TLS certificate
 --encrypt/--no-encrypt, -e/-n   Enable/disable encrypted transport (default: enabled)
 --retries,              -r      Number of retry attempts for transient errors (default: 3)
+--packet-size                   TDS packet size in bytes, 512–32767 (default: 16383)
 --pk-column,            -P      Primary key column for deterministic partitioning
 --columns,              -C      Comma-separated list of columns to export (all by default)
 --worker-count,         -w      Number of worker processes (default: 1)
@@ -237,6 +238,7 @@ pybutt import \
 --trust-cert,                 -c      Trust the SQL Server TLS certificate
 --encrypt/--no-encrypt,       -e/-n   Enable/disable encrypted transport (default: enabled)
 --retries,                    -r      Number of retry attempts for transient errors (default: 3)
+--packet-size                         TDS packet size in bytes, 512–32767 (default: 16383)
 --worker-count,               -w      Number of parallel import threads (default: 1)
 --batch-size,                 -b      Rows per batch insert (default: 1000; mssql-python: 1048576)
 --engine,                     -E      Import engine to use: duckdb, pyodbc, or mssql-python (default: pyodbc)

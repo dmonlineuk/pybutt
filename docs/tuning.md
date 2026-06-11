@@ -13,6 +13,7 @@ knobs interact. Read [concepts](concepts.md) first for the underlying model.
 | `--transaction-mode` | import | commit boundary & retry scope | durability vs lock duration |
 | `--worker-count` | both | parallel partitions (export) / files (import) | throughput, multiplies memory |
 | `--file-count` | export | number of output Parquet files | parallelism granularity |
+| `--packet-size` | both | TDS network packet size (bytes) | network efficiency |
 | `--retries` | both | transient-error retry attempts | resilience |
 
 ## Export knobs
@@ -84,6 +85,16 @@ section. Single-worker imports are unaffected.
 ### `--file-count` (`-f`) (export)
 Number of Parquet output files to split the table into. More files = finer
 parallelism granularity and smaller individual files.
+
+### `--packet-size`
+- **What it is:** the TDS network packet size negotiated with SQL Server.
+- **Default:** `16383` — the maximum for encrypted connections. SQL Server caps
+  encrypted packets at 16,383 bytes; unencrypted connections support up to 32,767.
+- **Valid range:** 512–32767.
+- **What it does:** larger packets reduce network round-trips for bulk data
+  transfers. The default is tuned for the common case (encryption enabled).
+  Override to a smaller value if your network path has MTU constraints or proxies
+  that fragment large TDS packets.
 
 ### `--retries` (`-r`)
 Number of attempts for transient SQL errors, applied at the transaction-mode
