@@ -1,7 +1,11 @@
+import queue
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pyarrow.parquet as pq
 
@@ -44,6 +48,18 @@ from pybutt.files.files import (
 )
 
 logger = get_logger("importer")
+
+_SENTINEL = object()
+
+
+@dataclass(slots=True)
+class _QueueItem:
+    """Payload passed from the reader thread to the writer."""
+
+    rows: list[tuple[Any, ...]]
+    rg_label: str
+    batch_idx: int | None
+    row_count: int
 
 
 class Importer(SqlServerIOBase):
@@ -390,10 +406,73 @@ class Importer(SqlServerIOBase):
                     )
                 )
 
+    # ------------------------------------------------------------------
+    # mssql-python producer-consumer helpers
+    # ------------------------------------------------------------------
+
+    def _mssql_reader_thread(
+        self,
+        parquet_file: pq.ParquetFile,
+        buf: queue.Queue[_QueueItem | object],
+        filename: str,
+        cancel: threading.Event,
+    ) -> None:
+        """Producer: read rowgroups/batches and enqueue row tuples."""
+        total_rg = parquet_file.num_row_groups
+        try:
+            for rg_idx in range(total_rg):
+                if cancel.is_set():
+                    return
+                rg_label = f"{rg_idx + 1}/{total_rg}"
+                self.mem_gate.check(f"read_row_group file={filename} rg={rg_label}")
+                logger.debug(
+                    "Reading row group "
+                    + context(file=filename, rg=rg_label, **mem_fields())
+                )
+                table = parquet_file.read_row_group(rg_idx)
+
+                if self.transaction_mode == TransactionMode.ROWGROUP:
+                    rows = rows_from_arrow(table)
+                    buf.put(
+                        _QueueItem(
+                            rows=rows,
+                            rg_label=rg_label,
+                            batch_idx=None,
+                            row_count=len(rows),
+                        )
+                    )
+                else:
+                    for batch_idx, batch in enumerate(
+                        table.to_batches(max_chunksize=self.batch_size)
+                    ):
+                        if cancel.is_set():
+                            return
+                        rows = self._rows_from_batch(batch)
+                        buf.put(
+                            _QueueItem(
+                                rows=rows,
+                                rg_label=rg_label,
+                                batch_idx=batch_idx,
+                                row_count=len(rows),
+                            )
+                        )
+        except Exception as exc:
+            buf.put(exc)
+            return
+        finally:
+            buf.put(_SENTINEL)
+
     def _import_file_with_mssql(
         self, filepath, filename, start, target_table: str | None = None
     ):
-        """Import a parquet file using mssql-python's bulkcopy API."""
+        """Import a parquet file using mssql-python's bulkcopy API.
+
+        Uses a producer-consumer pattern: a reader thread pre-reads
+        rowgroups/batches into a bounded queue while the caller thread
+        pushes rows to SQL Server via ``cursor.bulkcopy``.  This keeps
+        the TDS pipe fed and avoids ASYNC_NETWORK_IO waits on the
+        server.
+        """
         parquet_file = pq.ParquetFile(filepath)
         columns = parquet_file.schema.names
         target_table_name = target_table or self.full_table_name()
@@ -415,84 +494,78 @@ class Importer(SqlServerIOBase):
                 cur.close()
 
             total_rows = 0
+            buf: queue.Queue[_QueueItem | object] = queue.Queue(maxsize=2)
+            cancel = threading.Event()
 
-            total_rg = parquet_file.num_row_groups
-            if self.transaction_mode == TransactionMode.ROWGROUP:
-                for rg_idx in range(total_rg):
-                    self.mem_gate.check(
-                        f"read_row_group file={filename} rg={rg_idx + 1}/{total_rg}"
-                    )
-                    logger.debug(
-                        "Reading row group "
-                        + context(
-                            file=filename,
-                            rg=f"{rg_idx + 1}/{total_rg}",
-                            **mem_fields(),
+            reader = threading.Thread(
+                target=self._mssql_reader_thread,
+                args=(parquet_file, buf, filename, cancel),
+                daemon=True,
+                name=f"mssql-reader-{filename}",
+            )
+            reader.start()
+
+            try:
+                while True:
+                    item = buf.get()
+                    if item is _SENTINEL:
+                        break
+                    if isinstance(item, Exception):
+                        raise item
+                    assert isinstance(item, _QueueItem)
+
+                    if self.transaction_mode == TransactionMode.ROWGROUP:
+                        rows_in_rg = self._mssql_bulkcopy_with_retry(
+                            conn,
+                            item.rows,
+                            columns,
+                            target_table_name,
+                            filename,
+                            op="bulkcopy(rowgroup)",
+                            rg=item.rg_label,
+                            offset=total_rows,
+                            is_rows=True,
                         )
-                    )
-                    table = parquet_file.read_row_group(rg_idx)
-                    rows_in_rg = self._mssql_bulkcopy_with_retry(
-                        conn,
-                        table,
-                        columns,
-                        target_table_name,
-                        filename,
-                        op="bulkcopy(rowgroup)",
-                        rg=f"{rg_idx + 1}/{total_rg}",
-                        offset=total_rows,
-                    )
-                    total_rows += rows_in_rg
-                    logger.debug(
-                        "Processed row group "
-                        + context(
-                            file=filename,
-                            rg=f"{rg_idx + 1}/{total_rg}",
-                            **mem_fields(),
-                        )
-                    )
-            else:
-                for rg_idx in range(total_rg):
-                    self.mem_gate.check(
-                        f"read_row_group file={filename} rg={rg_idx + 1}/{total_rg}"
-                    )
-                    logger.debug(
-                        "Reading row group "
-                        + context(
-                            file=filename,
-                            rg=f"{rg_idx + 1}/{total_rg}",
-                            **mem_fields(),
-                        )
-                    )
-                    table = parquet_file.read_row_group(rg_idx)
-                    for batch_idx, batch in enumerate(
-                        table.to_batches(max_chunksize=self.batch_size)
-                    ):
-                        rows = self._rows_from_batch(batch)
-                        if self.transaction_mode == TransactionMode.BATCH:
-                            rows_in_batch = self._mssql_bulkcopy_with_retry(
-                                conn,
-                                rows,
-                                columns,
-                                target_table_name,
-                                filename,
-                                op="bulkcopy(batch)",
-                                rg=f"{rg_idx + 1}/{total_rg}",
-                                batch=batch_idx,
-                                offset=total_rows,
-                                is_rows=True,
+                        total_rows += rows_in_rg
+                        logger.debug(
+                            "Processed row group "
+                            + context(
+                                file=filename,
+                                rg=item.rg_label,
+                                **mem_fields(),
                             )
-                            total_rows += rows_in_batch
-                        else:
-                            cursor = conn.cursor()
-                            try:
-                                cursor.bulkcopy(
-                                    target_table_name,
-                                    rows,
-                                    column_mappings=columns,
-                                )
-                            finally:
-                                cursor.close()
-                            total_rows += len(rows)
+                        )
+                    elif self.transaction_mode == TransactionMode.BATCH:
+                        rows_in_batch = self._mssql_bulkcopy_with_retry(
+                            conn,
+                            item.rows,
+                            columns,
+                            target_table_name,
+                            filename,
+                            op="bulkcopy(batch)",
+                            rg=item.rg_label,
+                            batch=item.batch_idx,
+                            offset=total_rows,
+                            is_rows=True,
+                        )
+                        total_rows += rows_in_batch
+                    else:
+                        # FILE / ROW modes — no per-item retry
+                        cursor = conn.cursor()
+                        try:
+                            cursor.bulkcopy(
+                                target_table_name,
+                                item.rows,
+                                column_mappings=columns,
+                            )
+                        finally:
+                            cursor.close()
+                        total_rows += item.row_count
+            except BaseException:
+                cancel.set()
+                raise
+            finally:
+                reader.join(timeout=5)
 
             if self.transaction_mode == TransactionMode.FILE:
                 conn.commit()
