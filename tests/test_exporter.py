@@ -86,26 +86,6 @@ class TestExporterInit:
         with pytest.raises(ConfigurationError, match="fetch_size must be at least 1"):
             _make_exporter(mock_config, tmp_path, fetch_size=-1)
 
-    def test_rowgroups_per_file_zero_raises(self, mock_config, tmp_path):
-        with pytest.raises(
-            ConfigurationError, match="rowgroups_per_file must be at least 1"
-        ):
-            _make_exporter(mock_config, tmp_path, file_count=1, rowgroups_per_file=0)
-
-    def test_rowgroups_per_file_negative_raises(self, mock_config, tmp_path):
-        with pytest.raises(
-            ConfigurationError, match="rowgroups_per_file must be at least 1"
-        ):
-            _make_exporter(mock_config, tmp_path, file_count=1, rowgroups_per_file=-1)
-
-    def test_rowgroups_per_file_with_file_count_raises(self, mock_config, tmp_path):
-        with pytest.raises(ConfigurationError, match="mutually exclusive"):
-            _make_exporter(mock_config, tmp_path, file_count=4, rowgroups_per_file=5)
-
-    def test_rowgroups_per_file_accepted(self, mock_config, tmp_path):
-        exp = _make_exporter(mock_config, tmp_path, file_count=1, rowgroups_per_file=3)
-        assert exp.rowgroups_per_file == 3
-
     def test_valid_engines_accepted(self, mock_config, tmp_path):
         for engine in ("duckdb", "pyodbc", "mssql-python"):
             exp = _make_exporter(mock_config, tmp_path, engine=engine)
@@ -138,57 +118,6 @@ class TestExporterInit:
     def test_pk_column_validated(self, mock_config, tmp_path):
         exp = _make_exporter(mock_config, tmp_path, pk_column="id")
         assert exp.pk_column == "id"
-
-
-class TestPartitionMetaRowgroupsPerFile:
-    """Test partition_meta derivation when rowgroups_per_file is set."""
-
-    def test_partition_count_derived_from_rowgroups_per_file(
-        self, mock_config, tmp_path
-    ):
-        exp = _make_exporter(mock_config, tmp_path, file_count=1, rowgroups_per_file=2)
-        # rowgroup_size=100, rowgroups_per_file=2
-        # rows_per_file=200, partition_count=ceil(1000/200)=5
-        exp.total_rows = 1000
-        exp.rowgroup_size = 100
-        exp.rowgroups_per_file = 2
-        import math
-
-        rows_per_file = exp.rowgroups_per_file * exp.rowgroup_size
-        exp.partition_count = math.ceil(exp.total_rows / rows_per_file)
-        exp.chunk_size = math.ceil(exp.total_rows / exp.partition_count)
-        assert exp.partition_count == 5
-        assert exp.chunk_size == 200
-
-    def test_partition_count_remainder(self, mock_config, tmp_path):
-        exp = _make_exporter(mock_config, tmp_path, file_count=1, rowgroups_per_file=3)
-        # total_rows=1000, rowgroup_size=100, rowgroups_per_file=3
-        # rows_per_file = 3 * 100 = 300, partition_count = ceil(1000/300) = 4
-        exp.total_rows = 1000
-        exp.rowgroup_size = 100
-        exp.rowgroups_per_file = 3
-        import math
-
-        rows_per_file = exp.rowgroups_per_file * exp.rowgroup_size
-        exp.partition_count = math.ceil(exp.total_rows / rows_per_file)
-        exp.chunk_size = math.ceil(exp.total_rows / exp.partition_count)
-        assert exp.partition_count == 4
-        assert exp.chunk_size == 250
-
-    def test_single_rowgroup_per_file(self, mock_config, tmp_path):
-        exp = _make_exporter(mock_config, tmp_path, file_count=1, rowgroups_per_file=1)
-        # total_rows=1000, rowgroup_size=100, rowgroups_per_file=1
-        # rows_per_file = 1 * 100 = 100, partition_count = ceil(1000/100) = 10
-        exp.total_rows = 1000
-        exp.rowgroup_size = 100
-        exp.rowgroups_per_file = 1
-        import math
-
-        rows_per_file = exp.rowgroups_per_file * exp.rowgroup_size
-        exp.partition_count = math.ceil(exp.total_rows / rows_per_file)
-        exp.chunk_size = math.ceil(exp.total_rows / exp.partition_count)
-        assert exp.partition_count == 10
-        assert exp.chunk_size == 100
 
 
 class TestSourceReference:

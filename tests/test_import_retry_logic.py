@@ -20,6 +20,7 @@ import pytest
 from pybutt.core.config import (
     SqlConfig,
     TransactionMode,
+    TRANSACTION_MODE_DEFAULT,
 )
 from pybutt.io.importer import Importer
 
@@ -73,29 +74,17 @@ def importer_file_mode(tmp_path, mock_config):
     )
 
 
-@pytest.fixture
-def importer_row_mode(tmp_path, mock_config):
-    """Create an Importer with ROW transaction mode."""
-    return Importer(
-        config=mock_config,
-        input_path=tmp_path,
-        manifest_filename="manifest.json",
-        batch_size=1000,
-        transaction_mode=TransactionMode.ROW,
-    )
-
-
 class TestTransactionModeDefaults:
     """Test transaction mode defaults and CLI parameter handling."""
 
-    def test_importer_default_transaction_mode_is_batch(self, tmp_path, mock_config):
-        """Verify that default transaction mode is BATCH (not FILE)."""
+    def test_importer_default_transaction_mode_is_correct_default(self, tmp_path, mock_config):
+        """Verify that default transaction mode is TRANSACTION_MODE_DEFAULT."""
         importer = Importer(
             config=mock_config,
             input_path=tmp_path,
             manifest_filename="manifest.json",
         )
-        assert importer.transaction_mode == TransactionMode.BATCH
+        assert importer.transaction_mode == TRANSACTION_MODE_DEFAULT
 
     def test_importer_accepts_batch_mode(self, tmp_path, mock_config):
         """Verify BATCH mode can be set."""
@@ -126,16 +115,6 @@ class TestTransactionModeDefaults:
             transaction_mode=TransactionMode.FILE,
         )
         assert importer.transaction_mode == TransactionMode.FILE
-
-    def test_importer_accepts_row_mode(self, tmp_path, mock_config):
-        """Verify ROW mode can be set."""
-        importer = Importer(
-            config=mock_config,
-            input_path=tmp_path,
-            manifest_filename="manifest.json",
-            transaction_mode=TransactionMode.ROW,
-        )
-        assert importer.transaction_mode == TransactionMode.ROW
 
     def test_importer_accepts_string_transaction_mode(self, tmp_path, mock_config):
         """Verify transaction mode accepts string and converts to enum."""
@@ -424,7 +403,7 @@ class TestRowGroupModeRetry:
 class TestFileModeRetry:
     """Test file-level retry logic for FILE transaction mode."""
 
-    @patch("pybutt.io.importer.Importer._import_file_impl")
+    @patch("pybutt.io.importer.Importer._import_file_with_mssql")
     def test_file_retry_succeeds_on_first_attempt(
         self, mock_impl, importer_file_mode, tmp_path
     ):
@@ -435,7 +414,7 @@ class TestFileModeRetry:
 
         assert mock_impl.call_count == 1
 
-    @patch("pybutt.io.importer.Importer._import_file_impl")
+    @patch("pybutt.io.importer.Importer._import_file_with_mssql")
     def test_file_retry_fails_then_succeeds(
         self, mock_impl, importer_file_mode, tmp_path
     ):
@@ -450,7 +429,7 @@ class TestFileModeRetry:
 
         assert mock_impl.call_count == 2
 
-    @patch("pybutt.io.importer.Importer._import_file_impl")
+    @patch("pybutt.io.importer.Importer._import_file_with_mssql")
     def test_file_retry_exhausts_retries(self, mock_impl, importer_file_mode, tmp_path):
         """Test that file import fails after exhausting retries."""
         mock_impl.side_effect = Exception("Persistent connection error")
@@ -462,23 +441,6 @@ class TestFileModeRetry:
                 importer_file_mode.import_file("test.parquet")
 
         assert mock_impl.call_count == 3
-
-
-class TestRowModeAutocommit:
-    """Test autocommit behavior for ROW transaction mode."""
-
-    @patch("pybutt.io.importer.Importer.connection_p")
-    def test_row_mode_uses_autocommit(self, mock_connection_p, importer_row_mode):
-        """Test that ROW mode creates connection with autocommit=True."""
-        importer_row_mode.connection_p(autocommit=True)
-
-        # connection_p is called with autocommit=True
-        mock_connection_p.assert_called()
-
-    def test_row_mode_transaction_mode_value(self, importer_row_mode):
-        """Test that ROW mode has correct enum value."""
-        assert importer_row_mode.transaction_mode == TransactionMode.ROW
-        assert importer_row_mode.transaction_mode.value == "row"
 
 
 class TestImportFileImpl:

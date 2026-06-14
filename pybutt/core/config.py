@@ -8,59 +8,56 @@ from pybutt.exceptions import (
     InvalidParameterError,
 )
 
+
 ENGINE_CHOICES = frozenset({"duckdb", "pyodbc", "mssql-python"})
-
-# Generic (engine-independent) fallback for the import batch size.
-DEFAULT_IMPORT_BATCH_SIZE = 1_000
-
-# Default memory heartbeat interval in seconds. Set to 30 so operators always
-# have a recent RSS breadcrumb trail when a worker is OOM-killed.
-DEFAULT_MEM_HEARTBEAT: float = 30.0
-
-# Default memory-pressure throttle threshold (% system memory used). When system
-# memory exceeds this %, workers sleep until pressure drops. Set to 85% so OOM
-# kill is avoided without throttling during normal operation.
-DEFAULT_MEM_THRESHOLD: float = 85.0
-
-# Seconds to sleep per throttle cycle and max total wait before giving up.
-DEFAULT_MEM_SLEEP: float = 5.0
-DEFAULT_MEM_MAX_WAIT: float = 300.0
-
-# Cooldown seconds after a throttle event before the gate re-checks. Prevents
-# the gate from firing on every loop iteration and serialising workers.
-DEFAULT_MEM_COOLDOWN: float = 30.0
-
-# Default TDS packet size in bytes. 16383 is the maximum for encrypted
-# connections (SQL Server caps encrypted packets at this size). Valid range
-# for all drivers is 512–32767.
-DEFAULT_PACKET_SIZE: int = 16_383
-
-# Per-engine default overrides, keyed by tunable name then engine. Only values
-# that diverge from the generic fallback are listed; everything else falls back.
-# See docs/defaults.md for the rationale behind each entry.
-ENGINE_DEFAULTS: dict[str, dict[str, int]] = {
-    # mssql-python import uses bulkcopy, where each batch closes a columnstore
-    # rowgroup, so default to a full rowgroup instead of the generic batch size.
-    "batch_size": {"mssql-python": 1_048_576},
-}
-
-
-def resolve_engine_default(
-    tunable: str, engine: str, value: int | None, fallback: int
-) -> int:
-    """Resolve a tunable: explicit value wins, else engine default, else fallback."""
-    if value is not None:
-        return value
-    return ENGINE_DEFAULTS.get(tunable, {}).get(engine, fallback)
-
 
 class TransactionMode(StrEnum):
     """Control how transactions are handled during import."""
 
-    ROW = "row"  # Each row commits individually (no transaction)
     BATCH = "batch"  # Each batch of batch_size rows in its own transaction
     ROWGROUP = "rowgroup"  # Each row group in the parquet file in its own transaction
     FILE = "file"  # Entire file in one transaction
+
+# Global defaults
+DRIVER_DEFAULT = "ODBC Driver 18 for SQL Server"
+SCHEMA_DEFAULT = 'dbo'
+TRUSTED_CONNECTION_DEFAULT= False
+TRUST_CERT_DEFAULT = False
+ENCRYPT_DEFAULT = True
+RETRIES_DEFAULT = 3
+
+# Default memory heartbeat interval in seconds. Set to 30 so operators always
+# have a recent RSS breadcrumb trail when a worker is OOM-killed.
+MEM_HEARTBEAT_DEFAULT: float = 30.0
+
+# Default memory-pressure throttle threshold (% system memory used). When system
+# memory exceeds this %, workers sleep until pressure drops. Set to 85% so OOM
+# kill is avoided without throttling during normal operation.
+MEM_THRESHOLD_DEFAULT: float = 85.0
+
+# Seconds to sleep per throttle cycle and max total wait before giving up.
+MEM_SLEEP_DEFAULT: float = 5.0
+MEM_MAX_WAIT_DEFAULT: float = 300.0
+
+# Cooldown seconds after a throttle event before the gate re-checks. Prevents
+# the gate from firing on every loop iteration and serialising workers.
+MEM_COOLDOWN_DEFAULT: float = 30.0
+
+# Default TDS packet size in bytes. 16383 is the maximum for encrypted
+# connections (SQL Server caps encrypted packets at this size). Valid range
+# for all drivers is 512–32767.
+PACKET_SIZE_DEFAULT: int = 4_096
+
+# Import specific defaults
+IMPORT_ENGINE_DEFAULT = "mssql-python"
+BATCH_SIZE_DEFAULT = 1_000
+TRANSACTION_MODE_DEFAULT = TransactionMode.ROWGROUP
+CCI_DEFAULT = True
+
+# Export specific defaults
+EXPORT_ENGINE_DEFAULT = "pyodbc"
+FETCH_SIZE_DEFAULT = 1_000
+ROWGROUP_SIZE_DEFAULT = 1_048_576
 
 
 def validate_engine(engine: str, allowed: frozenset[str] | None = None) -> str:
@@ -132,16 +129,16 @@ def sanitise_dsn_value(value: str) -> str:
 class SqlConfig:
     server: str
     database: str
-    schema: str
     table: str
     username: str | None = None
     password: str | None = None
-    driver: str = "ODBC Driver 18 for SQL Server"
-    trusted_connection: bool = False
-    trust_cert: bool = False
-    encrypt: bool = True
-    retries: int = 3
-    packet_size: int = DEFAULT_PACKET_SIZE
+    schema: str = SCHEMA_DEFAULT
+    driver: str = DRIVER_DEFAULT
+    trusted_connection: bool = TRUSTED_CONNECTION_DEFAULT
+    trust_cert: bool = TRUST_CERT_DEFAULT
+    encrypt: bool = ENCRYPT_DEFAULT
+    retries: int = RETRIES_DEFAULT
+    packet_size: int = PACKET_SIZE_DEFAULT
 
 
 if __name__ == "__main__":

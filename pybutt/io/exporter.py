@@ -9,14 +9,16 @@ import pyodbc
 
 from pybutt.core.base import SqlServerIOBase
 from pybutt.core.config import (
-    DEFAULT_MEM_COOLDOWN,
-    DEFAULT_MEM_HEARTBEAT,
-    DEFAULT_MEM_MAX_WAIT,
-    DEFAULT_MEM_SLEEP,
-    DEFAULT_MEM_THRESHOLD,
+    MEM_COOLDOWN_DEFAULT,
+    MEM_HEARTBEAT_DEFAULT,
+    MEM_MAX_WAIT_DEFAULT,
+    MEM_SLEEP_DEFAULT,
+    MEM_THRESHOLD_DEFAULT,
+    ROWGROUP_SIZE_DEFAULT,
+    FETCH_SIZE_DEFAULT,
+    EXPORT_ENGINE_DEFAULT,
     SqlConfig,
     quote_identifier,
-    resolve_engine_default,
     validate_engine,
     validate_identifier,
     validate_parameters,
@@ -54,17 +56,16 @@ class Exporter(SqlServerIOBase):
         columns=None,
         worker_count=1,
         file_count=1,
-        rowgroup_size=1_048_576,
-        fetch_size=None,
-        engine="duckdb",
+        rowgroup_size=ROWGROUP_SIZE_DEFAULT,
+        fetch_size=FETCH_SIZE_DEFAULT,
+        engine=EXPORT_ENGINE_DEFAULT,
         manifest_filename: str | None = None,
         parameters: str | None = None,
-        mem_heartbeat: float = DEFAULT_MEM_HEARTBEAT,
-        mem_threshold: float = DEFAULT_MEM_THRESHOLD,
-        mem_sleep: float = DEFAULT_MEM_SLEEP,
-        mem_max_wait: float = DEFAULT_MEM_MAX_WAIT,
-        mem_cooldown: float = DEFAULT_MEM_COOLDOWN,
-        rowgroups_per_file: int | None = None,
+        mem_heartbeat: float = MEM_HEARTBEAT_DEFAULT,
+        mem_threshold: float = MEM_THRESHOLD_DEFAULT,
+        mem_sleep: float = MEM_SLEEP_DEFAULT,
+        mem_max_wait: float = MEM_MAX_WAIT_DEFAULT,
+        mem_cooldown: float = MEM_COOLDOWN_DEFAULT,
     ):
         super().__init__(config)
 
@@ -77,14 +78,6 @@ class Exporter(SqlServerIOBase):
 
         validate_engine(engine)
 
-        if rowgroups_per_file is not None and file_count != 1:
-            raise ConfigurationError(
-                "--rowgroups-per-file and --file-count are mutually exclusive"
-            )
-
-        if rowgroups_per_file is not None and rowgroups_per_file < 1:
-            raise ConfigurationError("rowgroups_per_file must be at least 1")
-
         if file_count < 1:
             raise ConfigurationError("file_count must be at least 1")
 
@@ -94,14 +87,8 @@ class Exporter(SqlServerIOBase):
         self.worker_count = worker_count
         self.file_count = file_count
         self.rowgroup_size = rowgroup_size
-        self.rowgroups_per_file = rowgroups_per_file
         self.engine = engine
-        self.fetch_size = resolve_engine_default(
-            "fetch_size",
-            self.engine,
-            fetch_size,
-            min(max(1024, self.rowgroup_size), 8192),
-        )
+        self.fetch_size = fetch_size
 
         self.output_path = Path(output_path)
         self.output_path.mkdir(parents=True, exist_ok=True)
@@ -153,11 +140,7 @@ class Exporter(SqlServerIOBase):
         if self.total_rows == 0:
             raise TableEmptyError("Table empty or not found")
 
-        if self.rowgroups_per_file is not None:
-            rows_per_file = self.rowgroups_per_file * self.rowgroup_size
-            self.partition_count = m.ceil(self.total_rows / rows_per_file)
-        else:
-            self.partition_count = self.file_count
+        self.partition_count = self.file_count
         self.chunk_size = m.ceil(self.total_rows / self.partition_count)
 
         logger.info(

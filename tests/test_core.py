@@ -7,10 +7,12 @@ import pytest
 
 from pybutt.core.base import SqlServerIOBase
 from pybutt.core.config import (
-    DEFAULT_IMPORT_BATCH_SIZE,
+    BATCH_SIZE_DEFAULT,
+    FETCH_SIZE_DEFAULT,
+    PACKET_SIZE_DEFAULT,
+    ROWGROUP_SIZE_DEFAULT,
     SqlConfig,
     quote_identifier,
-    resolve_engine_default,
     validate_identifier,
 )
 from pybutt.exceptions import InvalidIdentifierError, MissingManifestEntryError
@@ -124,7 +126,7 @@ def test_exporter_fetch_size_default(monkeypatch):
         rowgroup_size=1_048_576,
     )
 
-    assert exporter.fetch_size == 8192
+    assert exporter.fetch_size == FETCH_SIZE_DEFAULT
 
 
 def test_exporter_fetch_size_override(monkeypatch):
@@ -589,6 +591,7 @@ def test_create_temp_tables_creates_columnstore_index_by_default(monkeypatch):
         config=config,
         input_path=Path("./data"),
         manifest_filename="manifest.json",
+        engine="pyodbc",
     )
 
     fake_connection, fake_cursor = _make_fake_connection()
@@ -627,7 +630,7 @@ def test_create_temp_tables_skips_columnstore_index_when_disabled(monkeypatch):
 
     fake_connection, fake_cursor = _make_fake_connection()
     monkeypatch.setattr(
-        importer, "connection_p", lambda autocommit=False: fake_connection
+        importer, "connection_m", lambda autocommit=False: fake_connection
     )
 
     importer._create_temp_tables(2)
@@ -738,41 +741,6 @@ def test_importer_perform_work_with_multiple_workers(monkeypatch, tmp_path):
     assert manifest_written["tables"] == created
 
 
-def test_importer_perform_work_deletes_original_files_and_manifest(
-    monkeypatch, tmp_path
-):
-    config = SqlConfig(
-        server="localhost",
-        database="TestDb",
-        schema="dbo",
-        table="MyTable",
-        trusted_connection=True,
-    )
-    input_path = tmp_path / "data"
-    input_path.mkdir()
-    filenames = ["a.parquet", "b.parquet"]
-    for name in filenames:
-        (input_path / name).write_text("empty")
-    manifest_path = input_path / "manifest.json"
-    manifest_path.write_text(json.dumps(filenames))
-
-    importer = Importer(
-        config=config,
-        input_path=input_path,
-        manifest_filename="manifest.json",
-        delete_files=True,
-    )
-
-    monkeypatch.setattr(
-        importer, "import_file", lambda filename, target_table=None: None
-    )
-
-    importer.perform_work()
-
-    assert not any((input_path / name).exists() for name in filenames)
-    assert not manifest_path.exists()
-
-
 def test_importer_multi_worker_defaults_to_local_temp_tables(monkeypatch, tmp_path):
     config = SqlConfig(
         server="localhost",
@@ -870,22 +838,6 @@ def _import_config():
     )
 
 
-def test_resolve_engine_default_explicit_value_wins():
-    assert resolve_engine_default("batch_size", "mssql-python", 42, 1000) == 42
-
-
-def test_resolve_engine_default_uses_engine_override():
-    assert resolve_engine_default("batch_size", "mssql-python", None, 1000) == 1_048_576
-
-
-def test_resolve_engine_default_falls_back_for_other_engines():
-    assert resolve_engine_default("batch_size", "pyodbc", None, 1000) == 1000
-
-
-def test_resolve_engine_default_unknown_tunable_uses_fallback():
-    assert resolve_engine_default("nope", "mssql-python", None, 7) == 7
-
-
 def test_importer_default_batch_size_pyodbc(tmp_path):
     importer = Importer(
         config=_import_config(),
@@ -894,7 +846,7 @@ def test_importer_default_batch_size_pyodbc(tmp_path):
         engine="pyodbc",
     )
 
-    assert importer.batch_size == DEFAULT_IMPORT_BATCH_SIZE
+    assert importer.batch_size == BATCH_SIZE_DEFAULT
 
 
 def test_importer_default_batch_size_mssql_python(tmp_path):
@@ -905,7 +857,7 @@ def test_importer_default_batch_size_mssql_python(tmp_path):
         engine="mssql-python",
     )
 
-    assert importer.batch_size == 1_048_576
+    assert importer.batch_size == BATCH_SIZE_DEFAULT
 
 
 def test_importer_explicit_batch_size_overrides_engine_default(tmp_path):
@@ -930,7 +882,7 @@ def test_exporter_fetch_size_no_engine_override(monkeypatch):
         engine="mssql-python",
     )
 
-    assert exporter.fetch_size == 8192
+    assert exporter.fetch_size == FETCH_SIZE_DEFAULT
 
 
 def test_connection_m_builds_correct_connection_string(monkeypatch):
@@ -1012,7 +964,7 @@ def test_connection_dsn_includes_default_packet_size():
         password="p",
     )
     base = SqlServerIOBase(config)
-    assert "PacketSize=16383" in base.dsn
+    assert f"PacketSize={PACKET_SIZE_DEFAULT}" in base.dsn
 
 
 def test_connection_dsn_custom_packet_size():

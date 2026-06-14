@@ -7,12 +7,25 @@ from pathlib import Path
 import typer
 
 from pybutt.core.config import (
-    DEFAULT_MEM_COOLDOWN,
-    DEFAULT_MEM_HEARTBEAT,
-    DEFAULT_MEM_MAX_WAIT,
-    DEFAULT_MEM_SLEEP,
-    DEFAULT_MEM_THRESHOLD,
-    DEFAULT_PACKET_SIZE,
+    DRIVER_DEFAULT,
+    SCHEMA_DEFAULT,
+    TRUSTED_CONNECTION_DEFAULT,
+    TRUST_CERT_DEFAULT,
+    ENCRYPT_DEFAULT,
+    EXPORT_ENGINE_DEFAULT,
+    FETCH_SIZE_DEFAULT,
+    ROWGROUP_SIZE_DEFAULT,
+    RETRIES_DEFAULT,
+    PACKET_SIZE_DEFAULT,
+    MEM_HEARTBEAT_DEFAULT,
+    MEM_THRESHOLD_DEFAULT,
+    MEM_SLEEP_DEFAULT,
+    MEM_MAX_WAIT_DEFAULT,
+    MEM_COOLDOWN_DEFAULT,
+    IMPORT_ENGINE_DEFAULT,
+    BATCH_SIZE_DEFAULT,
+    TRANSACTION_MODE_DEFAULT,
+    CCI_DEFAULT,
     SqlConfig,
     TransactionMode,
 )
@@ -78,16 +91,16 @@ def parse_columns(columns: str | None) -> list[str] | None:
 def build_sql_config(
     server: str,
     database: str,
-    schema: str,
     table: str,
     username: str | None,
     password: str | None,
-    driver: str,
-    trusted_connection: bool,
-    trust_cert: bool,
-    encrypt: bool,
-    retries: int,
-    packet_size: int = DEFAULT_PACKET_SIZE,
+    schema: str = SCHEMA_DEFAULT,
+    driver: str = DRIVER_DEFAULT,
+    trusted_connection: bool = TRUSTED_CONNECTION_DEFAULT,
+    trust_cert: bool = TRUST_CERT_DEFAULT,
+    encrypt: bool = ENCRYPT_DEFAULT,
+    retries: int = RETRIES_DEFAULT,
+    packet_size: int = PACKET_SIZE_DEFAULT,
 ) -> SqlConfig:
     if not trusted_connection:
         if not username:
@@ -123,23 +136,117 @@ def build_sql_config(
     ),
 )
 def export(
+    verbose: bool = typer.Option(  # noqa: B008
+        False,
+        "--verbose",
+        "-V",
+        help="Show verbose logging output.",
+    ),
     server: str = typer.Option(  # noqa: B008
-        ..., "--server", "-s", help="SQL Server hostname or instance."
+        ...,
+        "--server",
+        "-s",
+        help="SQL Server hostname or instance.",
+        rich_help_panel="Server Connection Options",
     ),
     database: str = typer.Option(  # noqa: B008
-        ..., "--database", "-d", help="Target SQL Server database."
+        ...,
+        "--database",
+        "-d",
+        help="Target SQL Server database.",
+        rich_help_panel="Server Connection Options",
+    ),
+    engine: str = typer.Option(  # noqa: B008
+        EXPORT_ENGINE_DEFAULT,
+        "--engine",
+        "-E",
+        help="Export engine to use: duckdb, pyodbc, or mssql-python.",
+        rich_help_panel="Server Connection Options",
+    ),
+    driver: str = typer.Option(  # noqa: B008
+        DRIVER_DEFAULT,
+        "--driver",
+        "-D",
+        help="ODBC driver to use.",
+        rich_help_panel="Server Connection Options",
     ),
     schema: str = typer.Option(  # noqa: B008
-        "dbo", "--schema", "-S", help="Target table schema."
+        SCHEMA_DEFAULT,
+        "--schema",
+        "-S",
+        help="Target table schema.",
+        rich_help_panel="SQL Data Object Options",
     ),
     table: str = typer.Option(  # noqa: B008
-        ..., "--table", "-t", help="Target table name."
+        ...,
+        "--table",
+        "-t",
+        help="Target table name.",
+        rich_help_panel="SQL Data Object Options",
+    ),
+    parameters: str | None = typer.Option(  # noqa: B008
+        None,
+        "--parameters",
+        help=(
+            "Comma-separated list of parameter values to pass to a table-valued "
+            "function. Example: --parameters 12,'fred','1989'."
+        ),
+        rich_help_panel="SQL Data Object Options",
+    ),
+    columns: str | None = typer.Option(  # noqa: B008
+        None,
+        "--columns",
+        "-C",
+        help="Comma-separated list of columns to export. Defaults to all columns.",
+        rich_help_panel="SQL Data Object Options",
+    ),
+    pk_column: str | None = typer.Option(  # noqa: B008
+        None,
+        "--pk-column",
+        "-P",
+        help="Primary key column for deterministic partitioning.",
+        rich_help_panel="SQL Data Object Options",
+    ),
+    username: str | None = typer.Option(  # noqa: B008
+        None,
+        "--username",
+        "-u",
+        help="SQL Server username when not using trusted connection.",
+        rich_help_panel="Server Security Options",
+    ),
+    password: str | None = typer.Option(  # noqa: B008
+        None,
+        "--password",
+        "-p",
+        help="SQL Server password when not using trusted connection.",
+        rich_help_panel="Server Security Options",
+    ),
+    trusted_connection: bool = typer.Option(  # noqa: B008
+        TRUSTED_CONNECTION_DEFAULT,
+        "--trusted-connection",
+        "-T",
+        help="Use integrated Windows authentication instead of username/password.",
+        rich_help_panel="Server Security Options",
+    ),
+    trust_cert: bool = typer.Option(  # noqa: B008
+        TRUST_CERT_DEFAULT,
+        "--trust-cert",
+        "-c",
+        help="Trust the SQL Server TLS certificate.",
+        rich_help_panel="Server Security Options",
+    ),
+    encrypt: bool = typer.Option(  # noqa: B008
+        ENCRYPT_DEFAULT,
+        "--encrypt/--no-encrypt",
+        help="Enable or disable SQL Server encrypted transport.",
+        rich_help_panel="Server Security Options",
     ),
     output_path: Path = typer.Option(  # noqa: B008
         ...,
         "--output-path",
         "-o",
         help="Directory to write Parquet files and manifest.",
+        rich_help_panel="File Options",
         file_okay=False,
         dir_okay=True,
         writable=True,
@@ -152,183 +259,101 @@ def export(
             "Manifest filename to write for export. Defaults to "
             "<schema>_<table>_manifest.json."
         ),
+        rich_help_panel="File Options",
     ),
-    trusted_connection: bool = typer.Option(  # noqa: B008
-        False,
-        "--trusted-connection",
-        "-T",
-        help="Use integrated Windows authentication instead of username/password.",
+    file_count: int = typer.Option(  # noqa: B008
+        1,
+        "--file-count",
+        "-f",
+        help=("Number of Parquet output files. "),
+        rich_help_panel="File Options",
+        min=1,
     ),
-    username: str | None = typer.Option(  # noqa: B008
-        None,
-        "--username",
-        "-u",
-        help="SQL Server username when not using trusted connection.",
+    fetch_size: int | None = typer.Option(  # noqa: B008
+        FETCH_SIZE_DEFAULT,
+        "--fetch-size",
+        "-F",
+        help=("Cursor fetch size for pyodbc export."),
+        rich_help_panel="Transport Tuning Options",
+        min=1,
     ),
-    password: str | None = typer.Option(  # noqa: B008
-        None,
-        "--password",
-        "-p",
-        help="SQL Server password when not using trusted connection.",
-    ),
-    driver: str = typer.Option(  # noqa: B008
-        "ODBC Driver 18 for SQL Server",
-        "--driver",
-        "-D",
-        help="ODBC driver name.",
-    ),
-    trust_cert: bool = typer.Option(  # noqa: B008
-        False,
-        "--trust-cert",
-        "-c",
-        help="Trust the SQL Server TLS certificate.",
-    ),
-    encrypt: bool = typer.Option(  # noqa: B008
-        True,
-        "--encrypt/--no-encrypt",
-        "-e/-n",
-        help="Enable or disable SQL Server encrypted transport.",
+    rowgroup_size: int = typer.Option(  # noqa: B008
+        ROWGROUP_SIZE_DEFAULT,
+        "--rowgroup-size",
+        "-R",
+        help="Number of rows per rowgroup in the Parquet files.",
+        rich_help_panel="Transport Tuning Options",
+        min=1,
     ),
     retries: int = typer.Option(  # noqa: B008
-        3,
+        RETRIES_DEFAULT,
         "--retries",
         "-r",
         help="Number of retry attempts for transient SQL errors.",
+        rich_help_panel="Transport Tuning Options",
         min=1,
     ),
     packet_size: int = typer.Option(  # noqa: B008
-        DEFAULT_PACKET_SIZE,
+        PACKET_SIZE_DEFAULT,
         "--packet-size",
         help=(
-            "TDS packet size in bytes (512\u201332767). "
-            f"Default: {DEFAULT_PACKET_SIZE} (max for encrypted connections)."
+            "TDS packet size in bytes (512-32767). "
+            "Note: encrypted connections are capped at 16383."
         ),
+        rich_help_panel="Transport Tuning Options",
         min=512,
         max=32767,
-    ),
-    pk_column: str | None = typer.Option(  # noqa: B008
-        None,
-        "--pk-column",
-        "-P",
-        help="Primary key column for deterministic partitioning.",
-    ),
-    columns: str | None = typer.Option(  # noqa: B008
-        None,
-        "--columns",
-        "-C",
-        help="Comma-separated list of columns to export. Defaults to all columns.",
     ),
     worker_count: int = typer.Option(  # noqa: B008
         1,
         "--worker-count",
         "-w",
         help="Number of worker processes used for export.",
+        rich_help_panel="Transport Tuning Options",
         min=1,
-    ),
-    file_count: int | None = typer.Option(  # noqa: B008
-        None,
-        "--file-count",
-        "-f",
-        help=(
-            "Number of Parquet output files. "
-            "Mutually exclusive with --rowgroups-per-file."
-        ),
-        min=1,
-    ),
-    rowgroups_per_file: int | None = typer.Option(  # noqa: B008
-        None,
-        "--rowgroups-per-file",
-        help=(
-            "Number of rowgroups per output file. The total file count is "
-            "derived from total_rows / (rowgroups_per_file × rowgroup_size). "
-            "Mutually exclusive with --file-count."
-        ),
-        min=1,
-    ),
-    parameters: str | None = typer.Option(
-        None,
-        "--parameters",
-        help=(
-            "Comma-separated list of parameter values to pass to a table-valued "
-            "function. Example: --parameters 12,'fred','1989'."
-        ),
-    ),
-    rowgroup_size: int = typer.Option(  # noqa: B008
-        1_048_576,
-        "--rowgroup-size",
-        "-R",
-        help="Number of rows per rowgroup in the Parquet files.",
-        min=1,
-    ),
-    fetch_size: int | None = typer.Option(  # noqa: B008
-        None,
-        "--fetch-size",
-        "-F",
-        help=(
-            "Cursor fetch size for pyodbc export. "
-            "Defaults to min(max(1024, rowgroup_size), 8192)."
-        ),
-        min=1,
-    ),
-    engine: str = typer.Option(  # noqa: B008
-        "duckdb",
-        "--engine",
-        "-E",
-        help="Export engine to use: duckdb, pyodbc, or mssql-python.",
-        case_sensitive=False,
     ),
     mem_heartbeat: float = typer.Option(  # noqa: B008
-        DEFAULT_MEM_HEARTBEAT,
+        MEM_HEARTBEAT_DEFAULT,
         "--mem-heartbeat",
-        help=(
-            "Log process memory (RSS + system %%) every N seconds. "
-            f"Default: {DEFAULT_MEM_HEARTBEAT}s. Set to 0 to disable."
-        ),
+        "-h",
+        help=("Log process memory (RSS + system %) every N seconds."),
+        rich_help_panel="Memory Tuning Options",
         min=0,
     ),
     mem_threshold: float = typer.Option(  # noqa: B008
-        DEFAULT_MEM_THRESHOLD,
+        MEM_THRESHOLD_DEFAULT,
         "--mem-threshold",
         help=(
-            "System memory %% at which workers are throttled. "
-            f"Default: {DEFAULT_MEM_THRESHOLD}%%. "
+            "System memory % at which workers are throttled. "
             "Set to 0 to disable throttling."
         ),
+        rich_help_panel="Memory Tuning Options",
         min=0,
         max=100,
     ),
     mem_sleep: float = typer.Option(  # noqa: B008
-        DEFAULT_MEM_SLEEP,
+        MEM_SLEEP_DEFAULT,
         "--mem-sleep",
-        help=(
-            "Seconds to sleep per throttle check when memory is high. "
-            f"Default: {DEFAULT_MEM_SLEEP}s."
-        ),
+        help=("Seconds to sleep per throttle check when memory is high. "),
+        rich_help_panel="Memory Tuning Options",
         min=0.1,
     ),
     mem_max_wait: float = typer.Option(  # noqa: B008
-        DEFAULT_MEM_MAX_WAIT,
+        MEM_MAX_WAIT_DEFAULT,
         "--mem-max-wait",
-        help=(
-            "Max total seconds to wait during memory throttling before "
-            f"giving up. Default: {DEFAULT_MEM_MAX_WAIT}s."
-        ),
+        help=("Max total seconds to wait during memory throttling before giving up."),
+        rich_help_panel="Memory Tuning Options",
         min=0,
     ),
     mem_cooldown: float = typer.Option(  # noqa: B008
-        DEFAULT_MEM_COOLDOWN,
+        MEM_COOLDOWN_DEFAULT,
         "--mem-cooldown",
         help=(
             "Seconds after a throttle event before re-checking. Prevents "
-            f"the gate from serialising workers. Default: {DEFAULT_MEM_COOLDOWN}s."
+            "the gate from serialising workers"
         ),
+        rich_help_panel="Memory Tuning Options",
         min=0,
-    ),
-    verbose: bool = typer.Option(  # noqa: B008
-        False,
-        "--verbose",
-        "-v",
-        help="Show verbose logging output.",
     ),
 ) -> None:
     """Export data from a SQL Server table to Parquet files.
@@ -361,11 +386,6 @@ def export(
         packet_size=packet_size,
     )
 
-    if file_count is not None and rowgroups_per_file is not None:
-        raise typer.BadParameter(
-            "--file-count and --rowgroups-per-file are mutually exclusive"
-        )
-
     effective_file_count = file_count if file_count is not None else 1
 
     try:
@@ -386,7 +406,6 @@ def export(
             mem_sleep=mem_sleep,
             mem_max_wait=mem_max_wait,
             mem_cooldown=mem_cooldown,
-            rowgroups_per_file=rowgroups_per_file,
         )
         exporter.perform_work()
     except PyButtError as exc:
@@ -400,95 +419,147 @@ def export(
     help=("Import Parquet files into a SQL Server table using a manifest file."),
 )
 def import_data(
+    manifest_path: Path = typer.Argument(  # noqa: B008
+        ..., help="Path to the input manifest file"
+    ),
+    verbose: bool = typer.Option(  # noqa: B008
+        False,
+        "--verbose",
+        "-V",
+        help="Show verbose logging output.",
+    ),
     server: str = typer.Option(  # noqa: B008
-        ..., "--server", "-s", help="SQL Server hostname or instance."
+        ...,
+        "--server",
+        "-s",
+        help="SQL Server hostname or instance.",
+        rich_help_panel="Server Connection Options",
     ),
     database: str = typer.Option(  # noqa: B008
-        ..., "--database", "-d", help="Target SQL Server database."
+        ...,
+        "--database",
+        "-d",
+        help="Target SQL Server database.",
+        rich_help_panel="Server Connection Options",
+    ),
+    driver: str = typer.Option(  # noqa: B008
+        DRIVER_DEFAULT,
+        "--driver",
+        "-D",
+        help="ODBC driver name.",
+        rich_help_panel="Server Connection Options",
+    ),
+    engine: str = typer.Option(  # noqa: B008
+        IMPORT_ENGINE_DEFAULT,
+        "--engine",
+        "-E",
+        help="Import engine to use: duckdb, pyodbc, or mssql-python.",
+        rich_help_panel="Server Connection Options",
+        case_sensitive=False,
+    ),
+    transaction_mode: TransactionMode = typer.Option(  # noqa: B008
+        TRANSACTION_MODE_DEFAULT,
+        "--transaction-mode",
+        "-M",
+        help=(
+            "Transaction scope: batch (per batch), rowgroup (per row group, "
+            "recommended), file (entire file)."
+        ),
+        rich_help_panel="Server Connection Options",
     ),
     schema: str = typer.Option(  # noqa: B008
-        "dbo", "--schema", "-S", help="Target table schema."
+        "dbo",
+        "--schema",
+        "-S",
+        help="Target table schema.",
+        rich_help_panel="SQL Data Object Options",
     ),
     table: str = typer.Option(  # noqa: B008
-        ..., "--table", "-t", help="Target table name."
-    ),
-    input_path: Path = typer.Option(  # noqa: B008
         ...,
-        "--input-path",
-        "-i",
-        help="Directory containing Parquet files and the manifest.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
+        "--table",
+        "-t",
+        help="Target table name.",
+        rich_help_panel="SQL Data Object Options",
     ),
-    manifest_filename: str | None = typer.Option(  # noqa: B008
-        None,
-        "--manifest-filename",
-        "-m",
+    cci: bool = typer.Option(  # noqa: B008
+        CCI_DEFAULT,
+        "--cci/--no-cci",
         help=(
-            "Manifest filename containing exported parquet file names. "
-            "Defaults to <schema>_<table>_manifest.json."
+            "Create a clustered columnstore index on the per-worker temp tables "
+            "used during multi-worker import. Use --no-cci to keep the previous "
+            "heap behaviour. Enabled by default."
         ),
-    ),
-    temp_manifest_filename: str | None = typer.Option(
-        None,
-        "--output-manifest-filename",
-        "-o",
-        help=(
-            "Override the temporary worker manifest filename written during "
-            "multi-worker import. Defaults to <schema>_<table>_temp_manifest.json."
-        ),
-    ),
-    trusted_connection: bool = typer.Option(  # noqa: B008
-        False,
-        "--trusted-connection",
-        "-T",
-        help="Use integrated Windows authentication instead of username/password.",
+        rich_help_panel="SQL Data Object Options",
     ),
     username: str | None = typer.Option(  # noqa: B008
         None,
         "--username",
         "-u",
         help="SQL Server username when not using trusted connection.",
+        rich_help_panel="Server Security Options",
     ),
     password: str | None = typer.Option(  # noqa: B008
         None,
         "--password",
         "-p",
         help="SQL Server password when not using trusted connection.",
+        rich_help_panel="Server Security Options",
     ),
-    driver: str = typer.Option(  # noqa: B008
-        "ODBC Driver 18 for SQL Server",
-        "--driver",
-        "-D",
-        help="ODBC driver name.",
+    trusted_connection: bool = typer.Option(  # noqa: B008
+        TRUSTED_CONNECTION_DEFAULT,
+        "--trusted-connection",
+        "-T",
+        help="Use integrated Windows authentication instead of username/password.",
+        rich_help_panel="Server Security Options",
     ),
     trust_cert: bool = typer.Option(  # noqa: B008
-        False,
+        TRUST_CERT_DEFAULT,
         "--trust-cert",
         "-c",
         help="Trust the SQL Server TLS certificate.",
+        rich_help_panel="Server Security Options",
     ),
     encrypt: bool = typer.Option(  # noqa: B008
-        True,
+        ENCRYPT_DEFAULT,
         "--encrypt/--no-encrypt",
         "-e/-n",
         help="Enable or disable SQL Server encrypted transport.",
+        rich_help_panel="Server Security Options",
+    ),
+    temp_manifest_filename: str | None = typer.Option(  # noqa: B008
+        None,
+        "--imported-manifest-filename",
+        "-o",
+        help=(
+            "Override the import worker manifest filename written during "
+            "multi-worker import. Defaults to <schema>_<table>_import_manifest.json."
+        ),
+        rich_help_panel="File Options",
+    ),
+    batch_size: int | None = typer.Option(  # noqa: B008
+        BATCH_SIZE_DEFAULT,
+        "--batch-size",
+        "-b",
+        help="Rows per batch insert.",
+        rich_help_panel="Transport Tuning Options",
+        min=1,
     ),
     retries: int = typer.Option(  # noqa: B008
-        3,
+        RETRIES_DEFAULT,
         "--retries",
         "-r",
         help="Number of retry attempts for transient SQL errors.",
+        rich_help_panel="Transport Tuning Options",
         min=1,
     ),
     packet_size: int = typer.Option(  # noqa: B008
-        DEFAULT_PACKET_SIZE,
+        PACKET_SIZE_DEFAULT,
         "--packet-size",
         help=(
-            "TDS packet size in bytes (512\u201332767). "
-            f"Default: {DEFAULT_PACKET_SIZE} (max for encrypted connections)."
+            "TDS packet size in bytes (512-32767). "
+            "Note: encrypted connections are capped at 16383."
         ),
+        rich_help_panel="Transport Tuning Options",
         min=512,
         max=32767,
     ),
@@ -497,104 +568,58 @@ def import_data(
         "--worker-count",
         "-w",
         help="Number of parallel import threads.",
+        rich_help_panel="Transport Tuning Options",
         min=1,
-    ),
-    batch_size: int | None = typer.Option(  # noqa: B008
-        None,
-        "--batch-size",
-        "-b",
-        help="Rows per batch insert. Default: 1000 (mssql-python: 1048576).",
-        min=1,
-    ),
-    verbose: bool = typer.Option(  # noqa: B008
-        False,
-        "--verbose",
-        "-v",
-        help="Show verbose logging output.",
-    ),
-    engine: str = typer.Option(  # noqa: B008
-        "pyodbc",
-        "--engine",
-        "-E",
-        help="Import engine to use: duckdb, pyodbc, or mssql-python.",
-        case_sensitive=False,
-    ),
-    transaction_mode: TransactionMode = typer.Option(  # noqa: B008
-        TransactionMode.BATCH,
-        "--transaction-mode",
-        "-M",
-        help=(
-            "Transaction scope: row (no transaction, auto-commit), batch (per batch, "
-            "recommended), rowgroup (per row group), file (entire file)."
-        ),
-    ),
-    delete_files: bool = typer.Option(
-        False,
-        "--delete-files",
-        "-x",
-        help=("Delete source parquet files and the manifest after import."),
-    ),
-    cci: bool = typer.Option(
-        True,
-        "--cci/--no-cci",
-        help=(
-            "Create a clustered columnstore index on the per-worker temp tables "
-            "used during multi-worker import. Use --no-cci to keep the previous "
-            "heap behaviour. Enabled by default."
-        ),
     ),
     mem_heartbeat: float = typer.Option(  # noqa: B008
-        DEFAULT_MEM_HEARTBEAT,
+        MEM_HEARTBEAT_DEFAULT,
         "--mem-heartbeat",
-        help=(
-            "Log process memory (RSS + system %%) every N seconds. "
-            f"Default: {DEFAULT_MEM_HEARTBEAT}s. Set to 0 to disable."
-        ),
+        "-h",
+        help=("Log process memory (RSS + system %) every N seconds."),
+        rich_help_panel="Memory Tuning Options",
         min=0,
     ),
     mem_threshold: float = typer.Option(  # noqa: B008
-        DEFAULT_MEM_THRESHOLD,
+        MEM_THRESHOLD_DEFAULT,
         "--mem-threshold",
         help=(
-            "System memory %% at which workers are throttled. "
-            f"Default: {DEFAULT_MEM_THRESHOLD}%%. "
+            "System memory % at which workers are throttled. "
             "Set to 0 to disable throttling."
         ),
+        rich_help_panel="Memory Tuning Options",
         min=0,
         max=100,
     ),
     mem_sleep: float = typer.Option(  # noqa: B008
-        DEFAULT_MEM_SLEEP,
+        MEM_SLEEP_DEFAULT,
         "--mem-sleep",
-        help=(
-            "Seconds to sleep per throttle check when memory is high. "
-            f"Default: {DEFAULT_MEM_SLEEP}s."
-        ),
+        help=("Seconds to sleep per throttle check when memory is high. "),
+        rich_help_panel="Memory Tuning Options",
         min=0.1,
     ),
     mem_max_wait: float = typer.Option(  # noqa: B008
-        DEFAULT_MEM_MAX_WAIT,
+        MEM_MAX_WAIT_DEFAULT,
         "--mem-max-wait",
-        help=(
-            "Max total seconds to wait during memory throttling before "
-            f"giving up. Default: {DEFAULT_MEM_MAX_WAIT}s."
-        ),
+        help=("Max total seconds to wait during memory throttling before giving up."),
+        rich_help_panel="Memory Tuning Options",
         min=0,
     ),
     mem_cooldown: float = typer.Option(  # noqa: B008
-        DEFAULT_MEM_COOLDOWN,
+        MEM_COOLDOWN_DEFAULT,
         "--mem-cooldown",
         help=(
             "Seconds after a throttle event before re-checking. Prevents "
-            f"the gate from serialising workers. Default: {DEFAULT_MEM_COOLDOWN}s."
+            "the gate from serialising workers"
         ),
+        rich_help_panel="Memory Tuning Options",
         min=0,
     ),
 ) -> None:
-    """Import Parquet files into a SQL Server table.
+    """Import one or more Parquet files into SQL Server tables.
 
     The command reads the manifest file and imports each Parquet file into the
-    target table using parameterized batch inserts.
+    target table. If the number of workers is greater than 1, the import will be
+    done using multiple tables created to the same data schema as the target table.
     """
 
     configure_logging(verbose)
@@ -624,14 +649,13 @@ def import_data(
     try:
         importer = Importer(
             config=config,
-            input_path=input_path,
-            manifest_filename=manifest_filename,
+            input_path=manifest_path.parent,
+            manifest_filename=manifest_path.name,
             worker_count=worker_count,
             batch_size=batch_size,
             transaction_mode=transaction_mode,
             engine=engine.lower(),
             temp_manifest_filename=temp_manifest_filename,
-            delete_files=delete_files,
             create_cci=cci,
             mem_heartbeat=mem_heartbeat,
             mem_threshold=mem_threshold,
@@ -647,72 +671,143 @@ def import_data(
 
 
 @app.command(
-    "merge",
+    "combine",
     help=(
         "Merge objects listed in a manifest. "
         "For file manifests, concatenate Parquet files to a single output. "
-        "For table manifests, merge SQL tables into a single target table."
+        "For table manifests, insert from SQL tables into a single target table."
     ),
 )
-def merge(
-    manifest_path: Path = typer.Option(  # noqa: B008
-        ..., "--manifest", "-m", help="Path to manifest file.", exists=True
+def combine(
+    manifest_path: Path = typer.Argument(  # noqa: B008
+        ..., help="Path to the input manifest file"
+    ),  # noqa: B008
+    verbose: bool = typer.Option(  # noqa: B008
+        False,
+        "--verbose",
+        "-V",
+        help="Show verbose logging output.",
     ),
-    # File merge options
+    server: str | None = typer.Option(  # noqa: B008
+        None,
+        "--server",
+        "-s",
+        help="SQL Server host.",
+        rich_help_panel="Server Connection Options",
+    ),
+    database: str | None = typer.Option(  # noqa: B008
+        None,
+        "--database",
+        "-d",
+        help="Target database.",
+        rich_help_panel="Server Connection Options",
+    ),
+    driver: str = typer.Option(  # noqa: B008
+        DRIVER_DEFAULT,
+        "--driver",
+        "-D",
+        help="ODBC driver name.",
+        rich_help_panel="Server Connection Options",
+    ),
+    schema: str = typer.Option(  # noqa: B008
+        SCHEMA_DEFAULT,
+        "--schema",
+        "-S",
+        help="Target schema.",
+        rich_help_panel="SQL Data Object Options",
+    ),
+    table: str | None = typer.Option(  # noqa: B008
+        None,
+        "--table",
+        "-t",
+        help="Target table.",
+        rich_help_panel="SQL Data Object Options",
+    ),
+    username: str | None = typer.Option(  # noqa: B008
+        None,
+        "--username",
+        "-u",
+        help="SQL Server username when not using trusted connection.",
+        rich_help_panel="Server Security Options",
+    ),
+    password: str | None = typer.Option(  # noqa: B008
+        None,
+        "--password",
+        "-p",
+        help="SQL Server password when not using trusted connection.",
+        rich_help_panel="Server Security Options",
+    ),
+    trusted_connection: bool = typer.Option(  # noqa: B008
+        TRUSTED_CONNECTION_DEFAULT,
+        "--trusted-connection",
+        "-T",
+        help="Use integrated Windows authentication instead of username/password.",
+        rich_help_panel="Server Security Options",
+    ),
+    trust_cert: bool = typer.Option(  # noqa: B008
+        TRUST_CERT_DEFAULT,
+        "--trust-cert",
+        "-c",
+        help="Trust the SQL Server TLS certificate.",
+        rich_help_panel="Server Security Options",
+    ),
+    encrypt: bool = typer.Option(  # noqa: B008
+        ENCRYPT_DEFAULT,
+        "--encrypt/--no-encrypt",
+        "-e/-n",
+        help="Enable or disable SQL Server encrypted transport.",
+        rich_help_panel="Server Security Options",
+    ),
     output_file: Path | None = typer.Option(  # noqa: B008
         None,
         "--output-file",
         "-o",
         help="Output Parquet file when merging files.",
+        rich_help_panel="File Options",
         file_okay=True,
         dir_okay=False,
     ),
-    delete_files: bool = typer.Option(
-        False,
-        "--delete-files",
-        "-x",
-        help=("Delete source parquet files and the manifest after merging."),
-    ),
     rowgroup_size: int = typer.Option(  # noqa: B008
-        1_048_576, "--rowgroup-size", "-R", help="Rowgroup size for output."
+        ROWGROUP_SIZE_DEFAULT,
+        "--rowgroup-size",
+        "-R",
+        help="Rowgroup size for output.",
+        rich_help_panel="File Options",
     ),
-    # SQL merge options (target)
-    server: str | None = typer.Option(
-        None, "--server", "-s", help="SQL Server host."
-    ),  # noqa: B008
-    database: str | None = typer.Option(  # noqa: B008
-        None, "--database", "-d", help="Target database."
+    output_manifest_filename: str | None = typer.Option(  # noqa: B008
+        None,
+        "--combined-manifest-filename",
+        "-m",
+        help=(
+            "Override the combined manifest filename written during. Defaults to <maneifest-filename>-merged.json."
+        ),
+        rich_help_panel="File Options",
     ),
-    schema: str | None = typer.Option(
-        None, "--schema", "-S", help="Target schema."
-    ),  # noqa: B008
-    table: str | None = typer.Option(
-        None, "--table", "-t", help="Target table."
-    ),  # noqa: B008
-    trusted_connection: bool = typer.Option(
-        False, "--trusted-connection", "-T"
-    ),  # noqa: B008
-    username: str | None = typer.Option(None, "--username", "-u"),  # noqa: B008
-    password: str | None = typer.Option(None, "--password", "-p"),  # noqa: B008
-    driver: str = typer.Option(  # noqa: B008
-        "ODBC Driver 18 for SQL Server", "--driver", "-D", help="ODBC driver name."
+    retries: int = typer.Option(  # noqa: B008
+        RETRIES_DEFAULT,
+        "--retries",
+        "-r",
+        help="Number of retry attempts for transient SQL errors.",
+        rich_help_panel="Transport Tuning Options",
+        min=1,
     ),
-    trust_cert: bool = typer.Option(False, "--trust-cert", "-c"),  # noqa: B008
-    encrypt: bool = typer.Option(True, "--encrypt/--no-encrypt", "-e/-n"),  # noqa: B008
-    retries: int = typer.Option(3, "--retries", "-r", min=1),  # noqa: B008
     packet_size: int = typer.Option(  # noqa: B008
-        DEFAULT_PACKET_SIZE,
+        PACKET_SIZE_DEFAULT,
         "--packet-size",
         help=(
-            "TDS packet size in bytes (512–32767). "
-            f"Default: {DEFAULT_PACKET_SIZE} (max for encrypted connections)."
+            "TDS packet size in bytes (512-32767). "
+            "Note: encrypted connections are capped at 16383."
         ),
+        rich_help_panel="Transport Tuning Options",
         min=512,
         max=32767,
     ),
-    verbose: bool = typer.Option(False, "--verbose", "-v"),  # noqa: B008
 ) -> None:
-    """Merge manifest entries according to manifest type."""
+    """Combine objects listed in a manifest.
+
+    For file manifests, this command concatenates Parquet files into a single output.
+    For table manifests, it inserts from SQL tables into a single target table.
+    """
 
     configure_logging(verbose)
 
@@ -731,7 +826,6 @@ def merge(
                 manifest_path,
                 output_file,
                 rowgroup_size,
-                delete_originals=delete_files,
             )
         except PyButtError as exc:
             typer.secho(f"Merge failed: {exc}", fg=typer.colors.RED, err=True)
@@ -769,6 +863,7 @@ def merge(
             typer.secho(f"Merge failed: {exc}", fg=typer.colors.RED, err=True)
             raise SystemExit(1) from exc
 
+        # ToDo: Review where this should be, and consider adding user override for path and filename
         new_manifest_name = f"{manifest_path.stem}_merged{manifest_path.suffix}"
         write_manifest(
             manifest_path.parent / new_manifest_name,
@@ -776,20 +871,26 @@ def merge(
             manifest_type="tables",
         )
 
-        if delete_files and manifest_path.exists():
-            manifest_path.unlink()
         typer.secho("Table merge completed successfully.", fg=typer.colors.GREEN)
         return
 
     raise typer.BadParameter(f"Unsupported manifest type: {manifest['type']}")
 
 
-@app.command("inspect")
-def inspect_command(
-    manifest: Path = typer.Argument(..., help="Path to manifest.json"),  # noqa: B008
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Show column details"
-    ),  # noqa: B008
+@app.command(
+    "inspect",
+    help=(
+        "Inspect Parquet files listed in a manifest. "
+        "Shows file-level metadata and optionally column-level details."
+    ),
+)
+def inspect(
+    manifest: Path = typer.Argument(  # noqa: B008
+        ..., help="Path to the input manifest file"
+    ),
+    verbose: bool = typer.Option(  # noqa: B008
+        False, "--verbose", "-V", help="Show column details"
+    ),
 ):
     """
     Inspect parquet files listed in a manifest.
@@ -797,39 +898,24 @@ def inspect_command(
     inspect_manifest(manifest, verbose)
 
 
-@app.command("rewrite")
-def rewrite_command(
-    manifest: Path = typer.Argument(...),  # noqa: B008
-    outdir: Path = typer.Option(  # noqa: B008
-        None, "--output-path", "-o", help="Output directory"
+@app.command(
+    "purge",
+    help=(
+        "Purge Parquet files or SQL tables listed in a manifest. "
+        "Also deletes the input manifest file."
     ),
-    rowgroup_size: int = typer.Option(..., "--rowgroup-size", "-R"),  # noqa: B008
-    new_manifest: str | None = typer.Option(  # noqa: B008
-        None,
-        "--new-manifest",
-        "-m",
-        help=(
-            "Optional filename for the rewritten manifest. Defaults to "
-            "<manifest>_new.json based on the original manifest name."
-        ),
+)
+def purge(
+    manifest: Path = typer.Argument(  # noqa: B008
+        ..., help="Path to the input manifest file"
     ),
-    delete_files: bool = typer.Option(
-        False,
-        "--delete-files",
-        "-x",
-        help=("Delete source parquet files and the manifest after merge."),
-    ),  # noqa: B008
+    verbose: bool = typer.Option(  # noqa: B008
+        False, "--verbose", "-V", help="Show column details"
+    ),
 ):
     """
-    Rewrite parquet files with a new row-group size.
+    Inspect parquet files listed in a manifest.
     """
-    rewrite_parquet_files(
-        manifest,
-        outdir,
-        rowgroup_size,
-        new_manifest,
-        delete_originals=delete_files,
-    )
 
 
 if __name__ == "__main__":

@@ -11,17 +11,19 @@ import pyarrow.parquet as pq
 
 from pybutt.core.base import SqlServerIOBase, rows_from_arrow
 from pybutt.core.config import (
-    DEFAULT_IMPORT_BATCH_SIZE,
-    DEFAULT_MEM_COOLDOWN,
-    DEFAULT_MEM_HEARTBEAT,
-    DEFAULT_MEM_MAX_WAIT,
-    DEFAULT_MEM_SLEEP,
-    DEFAULT_MEM_THRESHOLD,
+    BATCH_SIZE_DEFAULT,
+    MEM_COOLDOWN_DEFAULT,
+    MEM_HEARTBEAT_DEFAULT,
+    MEM_MAX_WAIT_DEFAULT,
+    MEM_SLEEP_DEFAULT,
+    MEM_THRESHOLD_DEFAULT,
+    TRANSACTION_MODE_DEFAULT,
+    IMPORT_ENGINE_DEFAULT,
+    CCI_DEFAULT,
     SqlConfig,
     TransactionMode,
     coerce_transaction_mode,
     quote_identifier,
-    resolve_engine_default,
     validate_engine,
 )
 from pybutt.core.logobs import (
@@ -69,17 +71,16 @@ class Importer(SqlServerIOBase):
         input_path,
         manifest_filename: str | None,
         worker_count=1,
-        batch_size: int | None = None,
-        transaction_mode: TransactionMode = TransactionMode.BATCH,
-        engine="pyodbc",
+        batch_size: int = BATCH_SIZE_DEFAULT,
+        transaction_mode: TransactionMode = TRANSACTION_MODE_DEFAULT,
+        engine=IMPORT_ENGINE_DEFAULT,
         temp_manifest_filename: str | None = None,
-        delete_files: bool = False,
-        create_cci: bool = True,
-        mem_heartbeat: float = DEFAULT_MEM_HEARTBEAT,
-        mem_threshold: float = DEFAULT_MEM_THRESHOLD,
-        mem_sleep: float = DEFAULT_MEM_SLEEP,
-        mem_max_wait: float = DEFAULT_MEM_MAX_WAIT,
-        mem_cooldown: float = DEFAULT_MEM_COOLDOWN,
+        create_cci: bool = CCI_DEFAULT,
+        mem_heartbeat: float = MEM_HEARTBEAT_DEFAULT,
+        mem_threshold: float = MEM_THRESHOLD_DEFAULT,
+        mem_sleep: float = MEM_SLEEP_DEFAULT,
+        mem_max_wait: float = MEM_MAX_WAIT_DEFAULT,
+        mem_cooldown: float = MEM_COOLDOWN_DEFAULT,
     ):
         super().__init__(config)
 
@@ -99,10 +100,7 @@ class Importer(SqlServerIOBase):
         self.transaction_mode = coerce_transaction_mode(transaction_mode)
         validate_engine(engine)
         self.engine = engine
-        self.batch_size = resolve_engine_default(
-            "batch_size", self.engine, batch_size, DEFAULT_IMPORT_BATCH_SIZE
-        )
-        self.delete_files = delete_files
+        self.batch_size = batch_size
         self.create_cci = create_cci
         self.mem_heartbeat = mem_heartbeat
         self.mem_gate = MemoryGate(mem_threshold, mem_sleep, mem_max_wait, mem_cooldown)
@@ -230,7 +228,7 @@ class Importer(SqlServerIOBase):
         """
         # For ROW mode, use autocommit; for others, manual commit control
         with self.connection_p(
-            autocommit=(self.transaction_mode == TransactionMode.ROW)
+            #autocommit=(self.transaction_mode == TransactionMode.ROW)
         ) as c:
             with c.cursor() as cur:
                 cur.fast_executemany = True
@@ -330,7 +328,7 @@ class Importer(SqlServerIOBase):
         self, filepath, filename, start, target_table: str | None = None
     ):
         with self.connection_p(
-            autocommit=(self.transaction_mode == TransactionMode.ROW)
+            # autocommit=(self.transaction_mode == TransactionMode.ROW)
         ) as c:
             with c.cursor() as cur:
                 cur.fast_executemany = True
@@ -477,7 +475,7 @@ class Importer(SqlServerIOBase):
         target_table_name = target_table or self.full_table_name()
 
         conn = self.connection_m(
-            autocommit=(self.transaction_mode == TransactionMode.ROW)
+            #autocommit=(self.transaction_mode == TransactionMode.ROW)
         )
         try:
             cur = conn.cursor()
@@ -882,8 +880,6 @@ class Importer(SqlServerIOBase):
 
             manifest_file = self._write_temp_manifest(temp_tables)
             logger.info("Wrote temporary table manifest " + context(file=manifest_file))
-            if self.delete_files:
-                self._delete_original_files(filenames)
             return
 
         with ThreadPoolExecutor(
@@ -896,8 +892,6 @@ class Importer(SqlServerIOBase):
 
             self._await_futures(futures, label="file")
 
-        if self.delete_files:
-            self._delete_original_files(filenames)
 
     def _await_futures(self, futures, label):
         """Wait for worker futures, surfacing *all* failures before re-raising.
