@@ -226,10 +226,7 @@ class Importer(SqlServerIOBase):
         pushes rows to SQL Server via ``cur.executemany``.  This keeps
         the TDS pipe fed and reduces ASYNC_NETWORK_IO waits.
         """
-        # For ROW mode, use autocommit; for others, manual commit control
-        with self.connection_p(
-            # autocommit=(self.transaction_mode == TransactionMode.ROW)
-        ) as c:
+        with self.connection_p() as c:
             with c.cursor() as cur:
                 cur.fast_executemany = True
                 parquet_file = pq.ParquetFile(filepath)
@@ -327,9 +324,7 @@ class Importer(SqlServerIOBase):
     def _import_file_with_duckdb(
         self, filepath, filename, start, target_table: str | None = None
     ):
-        with self.connection_p(
-            # autocommit=(self.transaction_mode == TransactionMode.ROW)
-        ) as c:
+        with self.connection_p() as c:
             with c.cursor() as cur:
                 cur.fast_executemany = True
                 if self.transaction_mode == TransactionMode.ROWGROUP:
@@ -474,9 +469,7 @@ class Importer(SqlServerIOBase):
         columns = parquet_file.schema.names
         target_table_name = target_table or self.full_table_name()
 
-        conn = self.connection_m(
-            # autocommit=(self.transaction_mode == TransactionMode.ROW)
-        )
+        conn = self.connection_m()
         try:
             cur = conn.cursor()
             try:
