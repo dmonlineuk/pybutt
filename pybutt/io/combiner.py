@@ -11,11 +11,11 @@ from pybutt.core.config import (
 from pybutt.core.logobs import context, get_logger
 from pybutt.exceptions import SchemaMismatchError
 
-logger = get_logger("merger")
+logger = get_logger("combiner")
 
 
-class TableMerger(SqlServerIOBase):
-    """Merge multiple SQL tables into a single target table.
+class TableCombine(SqlServerIOBase):
+    """Combine multiple SQL tables into a single target table.
 
     Sources should be provided as fully-qualified schema.table strings.
     """
@@ -75,8 +75,8 @@ class TableMerger(SqlServerIOBase):
 
         return src_cols
 
-    def merge(self, target_schema: str, target_table: str):
-        """Merge all source tables into the target table.
+    def combine(self, target_schema: str, target_table: str):
+        """Combine all source tables into the target table.
 
         Implementation: create target if missing using first source schema, then
         run `INSERT INTO target SELECT * FROM source` for each source.
@@ -100,7 +100,7 @@ class TableMerger(SqlServerIOBase):
                         f"{quote_identifier(src_schema)}.{quote_identifier(src_table)}"
                     )
                     logger.info(
-                        "Merging "
+                        "Combining "
                         + context(
                             source=f"{src_schema}.{src_table}",
                             target=f"{target_schema}.{target_table}",
@@ -113,4 +113,4 @@ class TableMerger(SqlServerIOBase):
                         conn.rollback()
                         raise
 
-        logger.info("Table merge completed")
+        logger.info("Table combine completed")

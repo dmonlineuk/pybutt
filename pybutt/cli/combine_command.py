@@ -23,7 +23,7 @@ from pybutt.files import (
     load_manifest,
     write_manifest,
 )
-from pybutt.io.merger import TableMerger
+from pybutt.io.combiner import TableCombine
 
 logger = get_logger("cli.combine")
 
@@ -215,22 +215,22 @@ def combine(
         )
 
         try:
-            merger = TableMerger(config=config, sources=manifest["entries"])
-            merger.merge(target_schema=schema, target_table=table)
+            merger = TableCombine(config=config, sources=manifest["entries"])
+            merger.combine(target_schema=schema, target_table=table)
         except PyButtError as exc:
-            typer.secho(f"Merge failed: {exc}", fg=typer.colors.RED, err=True)
+            typer.secho(f"Combine failed: {exc}", fg=typer.colors.RED, err=True)
             raise SystemExit(1) from exc
 
         # ToDo: Review where this should be, and consider
         # adding user override for path and filename
-        new_manifest_name = f"{manifest_path.stem}_merged{manifest_path.suffix}"
+        new_manifest_name = f"{manifest_path.stem}_combined{manifest_path.suffix}"
         write_manifest(
             manifest_path.parent / new_manifest_name,
             [f"{schema}.{table}"],
             manifest_type="tables",
         )
 
-        typer.secho("Table merge completed successfully.", fg=typer.colors.GREEN)
+        typer.secho("Table combine completed successfully.", fg=typer.colors.GREEN)
         return
 
     raise typer.BadParameter(f"Unsupported manifest type: {manifest['type']}")
