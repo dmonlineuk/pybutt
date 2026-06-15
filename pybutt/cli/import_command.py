@@ -29,7 +29,7 @@ from pybutt.core.logobs import configure_logging, get_logger
 from pybutt.exceptions import PyButtError
 from pybutt.io.importer import Importer
 
-logger = get_logger("cli")
+logger = get_logger("cli.import")
 
 
 @app.command(

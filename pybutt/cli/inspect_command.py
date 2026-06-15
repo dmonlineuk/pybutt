@@ -3,7 +3,10 @@ from pathlib import Path
 import typer
 
 from pybutt.cli.app import app
+from pybutt.core.logobs import get_logger
 from pybutt.files.files import inspect_manifest
+
+logger = get_logger("cli.inspect")
 
 
 @app.command(

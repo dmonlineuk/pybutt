@@ -25,7 +25,7 @@ from pybutt.files.files import (
 )
 from pybutt.io.merger import TableMerger
 
-logger = get_logger("cli")
+logger = get_logger("cli.combine")
 
 
 @app.command(
