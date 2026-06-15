@@ -19,8 +19,8 @@ from pybutt.core.config import (
 from pybutt.core.logobs import configure_logging, get_logger
 from pybutt.exceptions import PyButtError
 from pybutt.files import (
-    load_manifest,
     combine_parquet_files,
+    load_manifest,
     write_manifest,
 )
 from pybutt.io.merger import TableMerger
