@@ -9,14 +9,14 @@ import pyodbc
 
 from pybutt.core.base import SqlServerIOBase
 from pybutt.core.config import (
+    EXPORT_ENGINE_DEFAULT,
+    FETCH_SIZE_DEFAULT,
     MEM_COOLDOWN_DEFAULT,
     MEM_HEARTBEAT_DEFAULT,
     MEM_MAX_WAIT_DEFAULT,
     MEM_SLEEP_DEFAULT,
     MEM_THRESHOLD_DEFAULT,
     ROWGROUP_SIZE_DEFAULT,
-    FETCH_SIZE_DEFAULT,
-    EXPORT_ENGINE_DEFAULT,
     SqlConfig,
     quote_identifier,
     validate_engine,

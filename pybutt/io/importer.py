@@ -12,14 +12,14 @@ import pyarrow.parquet as pq
 from pybutt.core.base import SqlServerIOBase, rows_from_arrow
 from pybutt.core.config import (
     BATCH_SIZE_DEFAULT,
+    CCI_DEFAULT,
+    IMPORT_ENGINE_DEFAULT,
     MEM_COOLDOWN_DEFAULT,
     MEM_HEARTBEAT_DEFAULT,
     MEM_MAX_WAIT_DEFAULT,
     MEM_SLEEP_DEFAULT,
     MEM_THRESHOLD_DEFAULT,
     TRANSACTION_MODE_DEFAULT,
-    IMPORT_ENGINE_DEFAULT,
-    CCI_DEFAULT,
     SqlConfig,
     TransactionMode,
     coerce_transaction_mode,
@@ -228,7 +228,7 @@ class Importer(SqlServerIOBase):
         """
         # For ROW mode, use autocommit; for others, manual commit control
         with self.connection_p(
-            #autocommit=(self.transaction_mode == TransactionMode.ROW)
+            # autocommit=(self.transaction_mode == TransactionMode.ROW)
         ) as c:
             with c.cursor() as cur:
                 cur.fast_executemany = True
@@ -475,7 +475,7 @@ class Importer(SqlServerIOBase):
         target_table_name = target_table or self.full_table_name()
 
         conn = self.connection_m(
-            #autocommit=(self.transaction_mode == TransactionMode.ROW)
+            # autocommit=(self.transaction_mode == TransactionMode.ROW)
         )
         try:
             cur = conn.cursor()
@@ -891,7 +891,6 @@ class Importer(SqlServerIOBase):
             }
 
             self._await_futures(futures, label="file")
-
 
     def _await_futures(self, futures, label):
         """Wait for worker futures, surfacing *all* failures before re-raising.

@@ -18,9 +18,9 @@ import pyarrow.parquet as pq
 import pytest
 
 from pybutt.core.config import (
+    TRANSACTION_MODE_DEFAULT,
     SqlConfig,
     TransactionMode,
-    TRANSACTION_MODE_DEFAULT,
 )
 from pybutt.io.importer import Importer
 
@@ -77,7 +77,9 @@ def importer_file_mode(tmp_path, mock_config):
 class TestTransactionModeDefaults:
     """Test transaction mode defaults and CLI parameter handling."""
 
-    def test_importer_default_transaction_mode_is_correct_default(self, tmp_path, mock_config):
+    def test_importer_default_transaction_mode_is_correct_default(
+        self, tmp_path, mock_config
+    ):
         """Verify that default transaction mode is TRANSACTION_MODE_DEFAULT."""
         importer = Importer(
             config=mock_config,

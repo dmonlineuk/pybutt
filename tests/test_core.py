@@ -10,7 +10,6 @@ from pybutt.core.config import (
     BATCH_SIZE_DEFAULT,
     FETCH_SIZE_DEFAULT,
     PACKET_SIZE_DEFAULT,
-    ROWGROUP_SIZE_DEFAULT,
     SqlConfig,
     quote_identifier,
     validate_identifier,

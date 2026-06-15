@@ -1,6 +1,6 @@
 from typer.testing import CliRunner
 
-from pybutt.cli import cli
+from pybutt import cli
 
 runner = CliRunner()
 
