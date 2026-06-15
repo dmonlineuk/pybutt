@@ -581,7 +581,7 @@ def test_merge_command_files_invokes_merge_helper(
             new_manifest_name,
         )
 
-    monkeypatch.setattr(combine_command, "merge_parquet_files", fake_merge)
+    monkeypatch.setattr(combine_command, "combine_parquet_files", fake_merge)
 
     output_file = tmp_path / "merged.parquet"
     result = runner.invoke(

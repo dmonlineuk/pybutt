@@ -40,9 +40,9 @@ from pybutt.exceptions import (
     RowGroupImportError,
     SchemaMismatchError,
 )
-from pybutt.files.files import (
+from pybutt.files import (
+    default_import_manifest_filename,
     default_manifest_filename,
-    default_temp_manifest_filename,
     load_file_manifest,
     load_manifest,
     validate_manifest_entries,
@@ -93,7 +93,7 @@ class Importer(SqlServerIOBase):
         self.temp_manifest_filename = (
             temp_manifest_filename
             if temp_manifest_filename
-            else default_temp_manifest_filename(self.schema, self.table)
+            else default_import_manifest_filename(self.schema, self.table)
         )
 
         self.worker_count = worker_count
