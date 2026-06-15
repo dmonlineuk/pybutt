@@ -159,7 +159,7 @@ def export(
     engine: str = typer.Option(  # noqa: B008
         EXPORT_ENGINE_DEFAULT,
         "--engine",
-        "-E",
+        "-e",
         help="Export engine to use: duckdb, pyodbc, or mssql-python.",
         rich_help_panel="Server Connection Options",
     ),
@@ -187,6 +187,7 @@ def export(
     parameters: str | None = typer.Option(  # noqa: B008
         None,
         "--parameters",
+        "-a",
         help=(
             "Comma-separated list of parameter values to pass to a table-valued "
             "function. Example: --parameters 12,'fred','1989'."
@@ -315,7 +316,6 @@ def export(
     mem_heartbeat: float = typer.Option(  # noqa: B008
         MEM_HEARTBEAT_DEFAULT,
         "--mem-heartbeat",
-        "-h",
         help=("Log process memory (RSS + system %) every N seconds."),
         rich_help_panel="Memory Tuning Options",
         min=0,
@@ -452,7 +452,7 @@ def import_data(
     engine: str = typer.Option(  # noqa: B008
         IMPORT_ENGINE_DEFAULT,
         "--engine",
-        "-E",
+        "-e",
         help="Import engine to use: duckdb, pyodbc, or mssql-python.",
         rich_help_panel="Server Connection Options",
         case_sensitive=False,
@@ -522,7 +522,6 @@ def import_data(
     encrypt: bool = typer.Option(  # noqa: B008
         ENCRYPT_DEFAULT,
         "--encrypt/--no-encrypt",
-        "-e/-n",
         help="Enable or disable SQL Server encrypted transport.",
         rich_help_panel="Server Security Options",
     ),
@@ -574,7 +573,6 @@ def import_data(
     mem_heartbeat: float = typer.Option(  # noqa: B008
         MEM_HEARTBEAT_DEFAULT,
         "--mem-heartbeat",
-        "-h",
         help=("Log process memory (RSS + system %) every N seconds."),
         rich_help_panel="Memory Tuning Options",
         min=0,
@@ -754,7 +752,6 @@ def combine(
     encrypt: bool = typer.Option(  # noqa: B008
         ENCRYPT_DEFAULT,
         "--encrypt/--no-encrypt",
-        "-e/-n",
         help="Enable or disable SQL Server encrypted transport.",
         rich_help_panel="Server Security Options",
     ),
@@ -779,7 +776,8 @@ def combine(
         "--combined-manifest-filename",
         "-m",
         help=(
-            "Override the combined manifest filename written during. Defaults to <maneifest-filename>-merged.json."
+            "Override the combined manifest filename for the written file. Defaults"
+            " to <manifest-filename>-merged.json."
         ),
         rich_help_panel="File Options",
     ),
