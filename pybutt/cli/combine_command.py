@@ -18,9 +18,9 @@ from pybutt.core.config import (
 )
 from pybutt.core.logobs import configure_logging, get_logger
 from pybutt.exceptions import PyButtError
-from pybutt.files.files import (
+from pybutt.files import (
     load_manifest,
-    merge_parquet_files,
+    combine_parquet_files,
     write_manifest,
 )
 from pybutt.io.merger import TableMerger
@@ -180,7 +180,7 @@ def combine(
             raise typer.BadParameter("--output-file is required for file manifests")
 
         try:
-            merge_parquet_files(
+            combine_parquet_files(
                 manifest_path,
                 output_file,
                 rowgroup_size,

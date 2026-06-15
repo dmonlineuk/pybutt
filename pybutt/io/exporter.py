@@ -39,7 +39,7 @@ from pybutt.exceptions import (
     DataExportError,
     TableEmptyError,
 )
-from pybutt.files.files import (
+from pybutt.files import (
     default_manifest_filename,
     write_manifest,
 )
