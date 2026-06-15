@@ -2,12 +2,14 @@ from .config import (
     SqlConfig,
     TransactionMode,
     coerce_transaction_mode,
+    quote_identifier,
     sanitise_dsn_value,
     validate_engine,
     validate_identifier,
     validate_parameters,
 )
 from .logobs import (
+    configure_logging,
     get_logger,
 )
 

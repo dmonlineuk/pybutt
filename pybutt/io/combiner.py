@@ -100,7 +100,7 @@ class TableCombine(SqlServerIOBase):
                         f"{quote_identifier(src_schema)}.{quote_identifier(src_table)}"
                     )
                     logger.info(
-                        "Merging "
+                        "Combining "
                         + context(
                             source=f"{src_schema}.{src_table}",
                             target=f"{target_schema}.{target_table}",

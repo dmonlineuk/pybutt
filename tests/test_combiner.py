@@ -1,5 +1,5 @@
 """
-Tests for pybutt.io.merger module.
+Tests for pybutt.io.combiner module.
 
 Covers:
 - TableCombine initialization
