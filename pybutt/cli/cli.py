@@ -7,25 +7,25 @@ from pathlib import Path
 import typer
 
 from pybutt.core.config import (
+    BATCH_SIZE_DEFAULT,
+    CCI_DEFAULT,
     DRIVER_DEFAULT,
-    SCHEMA_DEFAULT,
-    TRUSTED_CONNECTION_DEFAULT,
-    TRUST_CERT_DEFAULT,
     ENCRYPT_DEFAULT,
     EXPORT_ENGINE_DEFAULT,
     FETCH_SIZE_DEFAULT,
-    ROWGROUP_SIZE_DEFAULT,
-    RETRIES_DEFAULT,
-    PACKET_SIZE_DEFAULT,
-    MEM_HEARTBEAT_DEFAULT,
-    MEM_THRESHOLD_DEFAULT,
-    MEM_SLEEP_DEFAULT,
-    MEM_MAX_WAIT_DEFAULT,
-    MEM_COOLDOWN_DEFAULT,
     IMPORT_ENGINE_DEFAULT,
-    BATCH_SIZE_DEFAULT,
+    MEM_COOLDOWN_DEFAULT,
+    MEM_HEARTBEAT_DEFAULT,
+    MEM_MAX_WAIT_DEFAULT,
+    MEM_SLEEP_DEFAULT,
+    MEM_THRESHOLD_DEFAULT,
+    PACKET_SIZE_DEFAULT,
+    RETRIES_DEFAULT,
+    ROWGROUP_SIZE_DEFAULT,
+    SCHEMA_DEFAULT,
     TRANSACTION_MODE_DEFAULT,
-    CCI_DEFAULT,
+    TRUST_CERT_DEFAULT,
+    TRUSTED_CONNECTION_DEFAULT,
     SqlConfig,
     TransactionMode,
 )
@@ -35,7 +35,6 @@ from pybutt.files.files import (
     inspect_manifest,
     load_manifest,
     merge_parquet_files,
-    rewrite_parquet_files,
     write_manifest,
 )
 from pybutt.io.exporter import Exporter
@@ -861,7 +860,8 @@ def combine(
             typer.secho(f"Merge failed: {exc}", fg=typer.colors.RED, err=True)
             raise SystemExit(1) from exc
 
-        # ToDo: Review where this should be, and consider adding user override for path and filename
+        # ToDo: Review where this should be, and consider
+        # adding user override for path and filename
         new_manifest_name = f"{manifest_path.stem}_merged{manifest_path.suffix}"
         write_manifest(
             manifest_path.parent / new_manifest_name,
@@ -908,11 +908,15 @@ def purge(
         ..., help="Path to the input manifest file"
     ),
     verbose: bool = typer.Option(  # noqa: B008
-        False, "--verbose", "-V", help="Show column details"
+        False,
+        "--verbose",
+        "-V",
+        help="Show verbose logging output.",
     ),
 ):
     """
-    Inspect parquet files listed in a manifest.
+    Purge parquet files or SQL tables listed in a manifest. Also
+    deletes the input manifest file.
     """
 
 

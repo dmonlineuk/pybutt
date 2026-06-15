@@ -5,10 +5,10 @@ from typer.testing import CliRunner
 
 from pybutt.cli import cli
 from pybutt.core.config import (
-    IMPORT_ENGINE_DEFAULT,
-    TransactionMode, 
     EXPORT_ENGINE_DEFAULT,
+    IMPORT_ENGINE_DEFAULT,
     TRANSACTION_MODE_DEFAULT,
+    TransactionMode,
 )
 
 runner = CliRunner()

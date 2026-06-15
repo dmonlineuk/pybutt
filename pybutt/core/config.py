@@ -8,8 +8,8 @@ from pybutt.exceptions import (
     InvalidParameterError,
 )
 
-
 ENGINE_CHOICES = frozenset({"duckdb", "pyodbc", "mssql-python"})
+
 
 class TransactionMode(StrEnum):
     """Control how transactions are handled during import."""
@@ -18,10 +18,11 @@ class TransactionMode(StrEnum):
     ROWGROUP = "rowgroup"  # Each row group in the parquet file in its own transaction
     FILE = "file"  # Entire file in one transaction
 
+
 # Global defaults
 DRIVER_DEFAULT = "ODBC Driver 18 for SQL Server"
-SCHEMA_DEFAULT = 'dbo'
-TRUSTED_CONNECTION_DEFAULT= False
+SCHEMA_DEFAULT = "dbo"
+TRUSTED_CONNECTION_DEFAULT = False
 TRUST_CERT_DEFAULT = False
 ENCRYPT_DEFAULT = True
 RETRIES_DEFAULT = 3
