@@ -693,7 +693,7 @@ def test_merge_command_tables_invokes_table_merger(monkeypatch, tmp_path):
         '{"version": 2, "type": "tables", "entries": ["dbo.TableA", "dbo.TableB"]}'
     )
 
-    monkeypatch.setattr(combine_command, "TableMerger", DummyMerger)
+    monkeypatch.setattr(combine_command, "TableCombine", DummyMerger)
 
     result = runner.invoke(
         app,

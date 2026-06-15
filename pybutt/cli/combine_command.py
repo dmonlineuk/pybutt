@@ -23,7 +23,7 @@ from pybutt.files import (
     load_manifest,
     write_manifest,
 )
-from pybutt.io.merger import TableMerger
+from pybutt.io.combiner import TableCombine
 
 logger = get_logger("cli.combine")
 
@@ -215,7 +215,7 @@ def combine(
         )
 
         try:
-            merger = TableMerger(config=config, sources=manifest["entries"])
+            merger = TableCombine(config=config, sources=manifest["entries"])
             merger.merge(target_schema=schema, target_table=table)
         except PyButtError as exc:
             typer.secho(f"Merge failed: {exc}", fg=typer.colors.RED, err=True)
