@@ -26,7 +26,7 @@ For example:
   `import_0`, `import_1`, …; export workers are separate processes (e.g.
   `SpawnPoolWorker-1`). This is what tells two otherwise-identical lines apart.
 - **logger** — which subsystem emitted the line: `pybutt.importer`,
-  `pybutt.exporter`, `pybutt.merger`, or `pybutt.base`.
+  `pybutt.exporter`, `pybutt.combiner`, or `pybutt.base`.
 - **message** — a short verb followed by structured `key=value` context (see
   below).
 

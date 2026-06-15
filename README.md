@@ -88,7 +88,7 @@ pip install -e .
 
 ### Command-Line Interface
 
-PyButt provides two main commands: `export` and `import`.
+PyButt provides the following commands: `export`, `import`, `combine`, `inspect`, and `purge`.
 
 #### Export Command
 
@@ -251,7 +251,7 @@ pybutt import \
 **Columnstore on temporary tables:**
 
 When importing with `--worker-count` of 2 or more, PyButt creates one temporary
-table per worker (`SELECT TOP 0 * INTO ... FROM <source>`) which can then be merged
+table per worker (`SELECT TOP 0 * INTO ... FROM <source>`) which can then be combined
 into the target afterwards. By default a clustered columnstore index (CCI) is now
 created on each temporary table to reduce the storage footprint of these staging
 tables. Pass `--no-cci` to keep the previous heap behaviour.
@@ -355,21 +355,21 @@ pybutt import \
   --transaction-mode row
 ```
 
-#### Merge Command
+#### Combine Command
 
-Merge objects listed in a manifest file. This command supports two types of merges depending on the manifest type:
+Combine objects listed in a manifest file. This command supports two types of combines depending on the manifest type:
 - **Files manifest (`type: "files"`)**: Concatenates multiple Parquet files into a single output Parquet file.
-- **Tables manifest (`type: "tables"`)**: Merges multiple temporary/worker SQL tables into a single target table on your SQL Server.
+- **Tables manifest (`type: "tables"`)**: Combines multiple temporary/worker SQL tables into a single target table on your SQL Server.
 
 ```bash
-# File merge example:
-pybutt merge \
-  --manifest ./exports/customers/dbo_Customers_manifest.json \
-  --output-file ./exports/customers/merged.parquet
+# File combine example:
+pybutt combine \
+  ./exports/customers/dbo_Customers_manifest.json \
+  --output-file ./exports/customers/combined.parquet
 
-# Table merge example:
-pybutt merge \
-  --manifest ./exports/customers/dbo_Customers_temp_manifest.json \
+# Table combine example:
+pybutt combine \
+  ./exports/customers/dbo_Customers_temp_manifest.json \
   --server YOUR_SERVER \
   --database YOUR_DB \
   --schema dbo \
@@ -377,25 +377,25 @@ pybutt merge \
   --username your_user
 ```
 
-**Merge Options:**
+**Combine Options:**
 
 ```
---manifest,             -m    Path to the manifest file (required)
---output-file,          -o    Output Parquet file path (required for file merges)
+manifest                      Path to manifest file (positional, required)
+--output-file,          -o    Output Parquet file path (required for file combines)
 --rowgroup-size,        -R    Rowgroup size for output Parquet file (default: 1048576)
---delete-files,         -x    Delete source files/manifests after successful merge
---server,               -s    SQL Server hostname or instance (required for table merges)
---database,             -d    Target database (required for table merges)
---schema,               -S    Target schema (required for table merges)
---table,                -t    Target table name (required for table merges)
---username,             -u    SQL Server username (for table merges)
---password,             -p    SQL Server password (for table merges)
+--combined-manifest-filename, -m  Override the combined manifest filename
+--server,               -s    SQL Server hostname or instance (required for table combines)
+--database,             -d    Target database (required for table combines)
+--schema,               -S    Target schema (required for table combines)
+--table,                -t    Target table name (required for table combines)
+--username,             -u    SQL Server username (for table combines)
+--password,             -p    SQL Server password (for table combines)
 --trusted-connection,   -T    Use Windows integrated authentication
 --driver,               -D    ODBC driver name (default: ODBC Driver 18 for SQL Server)
 --trust-cert,           -c    Trust the SQL Server TLS certificate
 --encrypt/--no-encrypt, -e/-n Enable/disable encrypted transport (default: enabled)
 --retries,              -r    Number of retry attempts for transient SQL errors (default: 3)
---verbose,              -v    Show verbose logging output
+--verbose,              -V    Show verbose logging output
 ```
 
 #### Inspect Command
@@ -411,27 +411,6 @@ pybutt inspect ./exports/customers/dbo_Customers_manifest.json
 ```
 manifest                      Path to manifest.json file (positional, required)
 --verbose,            -v      Show full column definitions, schema, and detailed metadata
-```
-
-#### Rewrite Command
-
-Rewrite existing Parquet files listed in a manifest using a new, updated row-group size:
-
-```bash
-pybutt rewrite \
-  ./exports/customers/dbo_Customers_manifest.json \
-  --output-path ./exports/customers_rewritten \
-  --rowgroup-size 500000
-```
-
-**Rewrite Options:**
-
-```
-manifest                      Path to manifest.json file (positional, required)
---output-path,        -o      Output directory to write the rewritten Parquet files
---rowgroup-size,      -R      New row-group size to apply (required)
---new-manifest,       -m      Optional customized name for rewritten manifest JSON file
---delete-files,       -x      Delete original parquet files and manifest after rewriting
 ```
 
 ### Password Input
@@ -457,9 +436,7 @@ Use PyButt as a module in your Python projects:
 First, create a `SqlConfig` object with your connection details:
 
 ```python
-from pybutt.core.config import SqlConfig
-from pybutt.io.exporter import Exporter
-from pybutt.io.importer import Importer
+from pybutt import SqlConfig, Exporter, Importer
 from pathlib import Path
 
 config = SqlConfig(
@@ -541,7 +518,7 @@ exporter.perform_work()
 
 **Default (batch-level transactions):**
 ```python
-from pybutt.core.config import TransactionMode
+from pybutt import TransactionMode
 
 importer = Importer(
     config=config,
@@ -602,9 +579,7 @@ importer.perform_work()
 
 ```python
 from pathlib import Path
-from pybutt.core.config import SqlConfig, TransactionMode
-from pybutt.io.exporter import Exporter
-from pybutt.io.importer import Importer
+from pybutt import SqlConfig, TransactionMode, Exporter, Importer
 
 # Configure connection
 config = SqlConfig(
@@ -656,10 +631,10 @@ When exporting, PyButt automatically creates a manifest JSON file listing all ge
 As of version 2, a manifest is a JSON object with a `version`, a `type`, and an
 `entries` list. Two manifest types are supported:
 
-- **`files`** — `entries` are Parquet file names (written by `export`, `rewrite`,
-  and file `merge`).
+- **`files`** — `entries` are Parquet file names (written by `export` and file
+  `combine`).
 - **`tables`** — `entries` are SQL Server table names (written during multi-worker
-  `import` and table `merge`, for consumption by the `merge` command).
+  `import` and table `combine`, for consumption by the `combine` command).
 
 **Example file manifest** (`dbo_MyTable_manifest.json`):
 ```json

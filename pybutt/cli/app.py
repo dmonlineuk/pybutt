@@ -19,7 +19,7 @@ app = typer.Typer(
     context_settings={"help_option_names": ["-?", "--help"]},
     help="""
 PyButt CLI for exporting and importing between MS SQL Server tables and Parquet
-files. Can also be used for inspecting Parquet files and merging files or tables
+files. Can also be used for inspecting Parquet files and combining files or tables
 based on manifest definitions.
 """,
 )

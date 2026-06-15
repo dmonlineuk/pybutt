@@ -19,17 +19,17 @@ from pybutt.core.config import (
 runner = CliRunner()
 
 
-class DummyMerger:
+class DummyCombiner:
     last_instance = None
 
     def __init__(self, config, sources):
         self.config = config
         self.sources = sources
-        self.merge_called = False
-        DummyMerger.last_instance = self
+        self.combine_called = False
+        DummyCombiner.last_instance = self
 
-    def merge(self, target_schema, target_table):
-        self.merge_called = True
+    def combine(self, target_schema, target_table):
+        self.combine_called = True
 
 
 class DummyExporter:
@@ -556,7 +556,7 @@ def test_export_command_passes_function_parameters(monkeypatch, tmp_path):
     assert exporter.parameters == "12,'fred','1989'"
 
 
-def test_merge_command_files_invokes_merge_helper(
+def test_combine_command_files_invokes_combine_helper(
     monkeypatch, tmp_path, create_parquet
 ):
     create_parquet(tmp_path, "a.parquet", rows=3)
@@ -566,7 +566,7 @@ def test_merge_command_files_invokes_merge_helper(
 
     called = {}
 
-    def fake_merge(
+    def fake_combine(
         manifest_path,
         output_file,
         rowgroup_size,
@@ -581,9 +581,9 @@ def test_merge_command_files_invokes_merge_helper(
             new_manifest_name,
         )
 
-    monkeypatch.setattr(combine_command, "combine_parquet_files", fake_merge)
+    monkeypatch.setattr(combine_command, "combine_parquet_files", fake_combine)
 
-    output_file = tmp_path / "merged.parquet"
+    output_file = tmp_path / "combined.parquet"
     result = runner.invoke(
         app,
         [
@@ -597,7 +597,7 @@ def test_merge_command_files_invokes_merge_helper(
     )
 
     assert result.exit_code == 0
-    assert "File merge completed successfully" in result.output
+    assert "File combine completed successfully" in result.output
     assert called["args"] == (manifest, output_file, 1048576, False, None)
 
 
@@ -687,13 +687,13 @@ def test_import_command_parses_no_cci_option(monkeypatch, tmp_path):
     assert DummyImporter.last_instance.create_cci is False
 
 
-def test_merge_command_tables_invokes_table_merger(monkeypatch, tmp_path):
+def test_combine_command_tables_invokes_table_combiner(monkeypatch, tmp_path):
     manifest = tmp_path / "manifest.json"
     manifest.write_text(
         '{"version": 2, "type": "tables", "entries": ["dbo.TableA", "dbo.TableB"]}'
     )
 
-    monkeypatch.setattr(combine_command, "TableCombine", DummyMerger)
+    monkeypatch.setattr(combine_command, "TableCombine", DummyCombiner)
 
     result = runner.invoke(
         app,
@@ -714,10 +714,10 @@ def test_merge_command_tables_invokes_table_merger(monkeypatch, tmp_path):
     )
 
     assert result.exit_code == 0
-    merger = DummyMerger.last_instance
-    assert merger is not None
-    assert merger.sources == ["dbo.TableA", "dbo.TableB"]
-    assert merger.merge_called
+    combiner = DummyCombiner.last_instance
+    assert combiner is not None
+    assert combiner.sources == ["dbo.TableA", "dbo.TableB"]
+    assert combiner.combine_called
 
 
 def test_import_command_passes_temp_manifest_filename(monkeypatch, tmp_path):
@@ -751,7 +751,7 @@ def test_import_command_passes_temp_manifest_filename(monkeypatch, tmp_path):
     assert importer.temp_manifest_filename == "custom_temp_manifest.json"
 
 
-def test_merge_command_files_requires_output_file(tmp_path):
+def test_combine_command_files_requires_output_file(tmp_path):
     manifest = tmp_path / "manifest.json"
     manifest.write_text('["a.parquet"]')
 

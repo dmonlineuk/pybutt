@@ -31,7 +31,7 @@ logger = get_logger("cli.combine")
 @app.command(
     "combine",
     help=(
-        "Merge objects listed in a manifest. "
+        "Combine objects listed in a manifest. "
         "For file manifests, concatenate Parquet files to a single output. "
         "For table manifests, insert from SQL tables into a single target table."
     ),
@@ -119,7 +119,7 @@ def combine(
         None,
         "--output-file",
         "-o",
-        help="Output Parquet file when merging files.",
+        help="Output Parquet file when combining files.",
         rich_help_panel="File Options",
         file_okay=True,
         dir_okay=False,
@@ -137,7 +137,7 @@ def combine(
         "-m",
         help=(
             "Override the combined manifest filename for the written file. Defaults"
-            " to <manifest-filename>-merged.json."
+            " to <manifest-filename>-combined.json."
         ),
         rich_help_panel="File Options",
     ),
@@ -172,7 +172,7 @@ def combine(
     try:
         manifest = load_manifest(manifest_path)
     except PyButtError as exc:
-        typer.secho(f"Merge failed: {exc}", fg=typer.colors.RED, err=True)
+        typer.secho(f"Combine failed: {exc}", fg=typer.colors.RED, err=True)
         raise SystemExit(1) from exc
 
     if manifest["type"] == "files":
@@ -186,9 +186,9 @@ def combine(
                 rowgroup_size,
             )
         except PyButtError as exc:
-            typer.secho(f"Merge failed: {exc}", fg=typer.colors.RED, err=True)
+            typer.secho(f"Combine failed: {exc}", fg=typer.colors.RED, err=True)
             raise SystemExit(1) from exc
-        typer.secho("File merge completed successfully.", fg=typer.colors.GREEN)
+        typer.secho("File combine completed successfully.", fg=typer.colors.GREEN)
         return
 
     # tables manifest
@@ -215,8 +215,8 @@ def combine(
         )
 
         try:
-            merger = TableCombine(config=config, sources=manifest["entries"])
-            merger.combine(target_schema=schema, target_table=table)
+            combiner = TableCombine(config=config, sources=manifest["entries"])
+            combiner.combine(target_schema=schema, target_table=table)
         except PyButtError as exc:
             typer.secho(f"Combine failed: {exc}", fg=typer.colors.RED, err=True)
             raise SystemExit(1) from exc
