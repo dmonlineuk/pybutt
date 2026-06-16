@@ -423,7 +423,9 @@ Use PyButt as a module in your Python projects:
 
 #### Configuration
 
-First, create a `SqlConfig` object with your connection details:
+First, create a `SqlConfig` object with your connection details. `SqlConfig` is
+purely connection configuration — schema and table are passed directly to
+`Exporter`, `Importer`, and `TableCombine`.
 
 ```python
 from pybutt import SqlConfig, Exporter, Importer
@@ -432,8 +434,6 @@ from pathlib import Path
 config = SqlConfig(
     server="sqlserver.example.com",
     database="MyDatabase",
-    schema="dbo",
-    table="Customers",
     username="dbuser",
     password="dbpassword",
     trusted_connection=False,
@@ -449,8 +449,6 @@ Or with Windows authentication:
 config = SqlConfig(
     server="SQLSERVER01\\INSTANCE",
     database="MyDatabase",
-    schema="dbo",
-    table="Customers",
     trusted_connection=True,
 )
 ```
@@ -462,7 +460,9 @@ from pathlib import Path
 
 exporter = Exporter(
     config=config,
+    table="Customers",                       # Target table name
     output_path=Path("./exports/customers"),
+    schema="dbo",                            # Schema (default: dbo)
     pk_column=None,                          # None for CHECKSUM partitioning
     columns=None,                            # None for all columns
     worker_count=4,                          # Number of parallel processes
@@ -479,6 +479,7 @@ With primary key partitioning:
 ```python
 exporter = Exporter(
     config=config,
+    table="Orders",
     output_path=Path("./exports/orders"),
     pk_column="OrderID",                     # Use PK for deterministic partitioning
     columns=["OrderID", "OrderDate", "Amount"],
@@ -495,6 +496,7 @@ With multiple workers and files:
 ```python
 exporter = Exporter(
     config=config,
+    table="Orders",
     output_path=Path("./exports/orders"),
     worker_count=4,
     file_count=4,                            # Distribute across 4 output files
@@ -512,6 +514,7 @@ from pybutt import TransactionMode
 
 importer = Importer(
     config=config,
+    table="Customers",
     input_path=Path("./exports/customers"),
     manifest_filename="customers_manifest.json",
     worker_count=4,                              # Number of parallel threads
@@ -527,6 +530,7 @@ print("Import completed successfully!")
 ```python
 importer = Importer(
     config=config,
+    table="Orders",
     input_path=Path("./exports/orders"),
     manifest_filename="orders_manifest.json",
     worker_count=4,
@@ -541,6 +545,7 @@ importer.perform_work()
 ```python
 importer = Importer(
     config=config,
+    table="LargeTable",
     input_path=Path("./exports/data"),
     manifest_filename="data_manifest.json",
     worker_count=4,
@@ -557,12 +562,10 @@ importer.perform_work()
 from pathlib import Path
 from pybutt import SqlConfig, TransactionMode, Exporter, Importer
 
-# Configure connection
+# Configure connection (purely connection details — no schema/table)
 config = SqlConfig(
     server="sqlserver.example.com",
     database="MyDatabase",
-    schema="dbo",
-    table="LargeTable",
     username="dbuser",
     password="dbpassword",
 )
@@ -571,6 +574,7 @@ config = SqlConfig(
 export_path = Path("./data_export")
 exporter = Exporter(
     config=config,
+    table="LargeTable",
     output_path=export_path,
     worker_count=4,
     file_count=4,
@@ -578,18 +582,10 @@ exporter = Exporter(
 exporter.perform_work()
 print("✓ Export complete")
 
-# Import into another table
-import_config = SqlConfig(
-    server="sqlserver.example.com",
-    database="MyDatabase",
-    schema="dbo",
-    table="LargeTableBackup",
-    username="dbuser",
-    password="dbpassword",
-)
-
+# Import into another table (reuse same connection config)
 importer = Importer(
-    config=import_config,
+    config=config,
+    table="LargeTableBackup",
     input_path=export_path,
     manifest_filename="dbo_LargeTable_manifest.json",
     worker_count=4,

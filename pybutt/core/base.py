@@ -11,7 +11,6 @@ from .config import (
     SqlConfig,
     quote_identifier,
     sanitise_dsn_value,
-    validate_identifier,
 )
 from .logobs import get_logger
 
@@ -30,10 +29,6 @@ def rows_from_arrow(arrow_obj) -> list[tuple]:
 class SqlServerIOBase:
     def __init__(self, config: SqlConfig):
         self.config = config
-
-        self.schema = validate_identifier(config.schema)
-        self.table = validate_identifier(config.table)
-
         self.dsn = self.build_dsn()
 
     def _connection_parts(self, *, include_driver: bool = True) -> list[str]:

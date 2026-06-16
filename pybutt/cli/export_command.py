@@ -277,8 +277,6 @@ def export(
     config = build_sql_config(
         server=server,
         database=database,
-        schema=schema,
-        table=table,
         username=username,
         password=password,
         driver=driver,
@@ -294,6 +292,8 @@ def export(
     try:
         exporter = Exporter(
             config=config,
+            schema=schema,
+            table=table,
             output_path=output_path,
             pk_column=pk_column,
             columns=parse_columns(columns),

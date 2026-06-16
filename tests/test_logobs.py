@@ -45,8 +45,6 @@ def mock_config():
     return SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
         retries=3,
     )
@@ -158,6 +156,8 @@ def test_base_retry_does_not_retry_memoryerror(mock_config):
 def test_importer_batch_retry_does_not_retry_memoryerror(tmp_path, mock_config):
     importer = Importer(
         config=mock_config,
+        schema="dbo",
+        table="MyTable",
         input_path=tmp_path,
         manifest_filename="manifest.json",
         batch_size=1000,
@@ -178,6 +178,8 @@ def test_importer_batch_retry_does_not_retry_memoryerror(tmp_path, mock_config):
 def test_importer_batch_retry_retries_other_errors(tmp_path, mock_config):
     importer = Importer(
         config=mock_config,
+        schema="dbo",
+        table="MyTable",
         input_path=tmp_path,
         manifest_filename="manifest.json",
         batch_size=1000,
@@ -200,6 +202,8 @@ def test_importer_batch_retry_retries_other_errors(tmp_path, mock_config):
 def test_await_futures_logs_failing_unit(tmp_path, mock_config, caplog):
     importer = Importer(
         config=mock_config,
+        schema="dbo",
+        table="MyTable",
         input_path=tmp_path,
         manifest_filename="manifest.json",
         batch_size=1000,
@@ -478,6 +482,8 @@ def test_log_failure_summary_no_completed(caplog):
 def test_importer_accepts_mem_heartbeat(tmp_path, mock_config):
     importer = Importer(
         config=mock_config,
+        schema="dbo",
+        table="MyTable",
         input_path=tmp_path,
         manifest_filename="manifest.json",
         mem_heartbeat=1.5,

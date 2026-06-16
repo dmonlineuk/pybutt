@@ -31,8 +31,6 @@ def mock_config():
     return SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
         retries=3,
     )
@@ -43,6 +41,8 @@ def importer_batch_mode(tmp_path, mock_config):
     """Create an Importer with BATCH transaction mode."""
     return Importer(
         config=mock_config,
+        schema="dbo",
+        table="MyTable",
         input_path=tmp_path,
         manifest_filename="manifest.json",
         batch_size=1000,
@@ -55,6 +55,8 @@ def importer_rowgroup_mode(tmp_path, mock_config):
     """Create an Importer with ROWGROUP transaction mode."""
     return Importer(
         config=mock_config,
+        schema="dbo",
+        table="MyTable",
         input_path=tmp_path,
         manifest_filename="manifest.json",
         batch_size=1000,
@@ -67,6 +69,8 @@ def importer_file_mode(tmp_path, mock_config):
     """Create an Importer with FILE transaction mode."""
     return Importer(
         config=mock_config,
+        schema="dbo",
+        table="MyTable",
         input_path=tmp_path,
         manifest_filename="manifest.json",
         batch_size=1000,
@@ -83,6 +87,8 @@ class TestTransactionModeDefaults:
         """Verify that default transaction mode is TRANSACTION_MODE_DEFAULT."""
         importer = Importer(
             config=mock_config,
+            schema="dbo",
+            table="MyTable",
             input_path=tmp_path,
             manifest_filename="manifest.json",
         )
@@ -92,6 +98,8 @@ class TestTransactionModeDefaults:
         """Verify BATCH mode can be set."""
         importer = Importer(
             config=mock_config,
+            schema="dbo",
+            table="MyTable",
             input_path=tmp_path,
             manifest_filename="manifest.json",
             transaction_mode=TransactionMode.BATCH,
@@ -102,6 +110,8 @@ class TestTransactionModeDefaults:
         """Verify ROWGROUP mode can be set."""
         importer = Importer(
             config=mock_config,
+            schema="dbo",
+            table="MyTable",
             input_path=tmp_path,
             manifest_filename="manifest.json",
             transaction_mode=TransactionMode.ROWGROUP,
@@ -112,6 +122,8 @@ class TestTransactionModeDefaults:
         """Verify FILE mode can be set."""
         importer = Importer(
             config=mock_config,
+            schema="dbo",
+            table="MyTable",
             input_path=tmp_path,
             manifest_filename="manifest.json",
             transaction_mode=TransactionMode.FILE,
@@ -122,6 +134,8 @@ class TestTransactionModeDefaults:
         """Verify transaction mode accepts string and converts to enum."""
         importer = Importer(
             config=mock_config,
+            schema="dbo",
+            table="MyTable",
             input_path=tmp_path,
             manifest_filename="manifest.json",
             transaction_mode="batch",
@@ -283,6 +297,8 @@ class TestRowGroupModeRetry:
         """Verify DuckDB ROWGROUP mode respects parquet row group boundaries."""
         importer = Importer(
             config=mock_config,
+            schema="dbo",
+            table="MyTable",
             input_path=tmp_path,
             manifest_filename="manifest.json",
             batch_size=1000,
@@ -577,6 +593,8 @@ class TestMssqlPythonBulkcopyRetry:
         """Create an Importer with mssql-python engine and BATCH mode."""
         return Importer(
             config=mock_config,
+            schema="dbo",
+            table="MyTable",
             input_path=tmp_path,
             manifest_filename="manifest.json",
             batch_size=1000,
@@ -589,6 +607,8 @@ class TestMssqlPythonBulkcopyRetry:
         """Create an Importer with mssql-python engine and ROWGROUP mode."""
         return Importer(
             config=mock_config,
+            schema="dbo",
+            table="MyTable",
             input_path=tmp_path,
             manifest_filename="manifest.json",
             batch_size=1000,
@@ -752,6 +772,8 @@ class TestMssqlPythonBulkcopyRetry:
         """Test _create_temp_tables creates CCI via connection_m."""
         importer = Importer(
             config=mock_config,
+            schema="dbo",
+            table="MyTable",
             input_path=tmp_path,
             manifest_filename="manifest.json",
             batch_size=1000,
@@ -786,6 +808,8 @@ class TestMssqlPythonBulkcopyRetry:
         """Test that _create_temp_tables skips CCI when create_cci=False."""
         importer = Importer(
             config=mock_config,
+            schema="dbo",
+            table="MyTable",
             input_path=tmp_path,
             manifest_filename="manifest.json",
             batch_size=1000,

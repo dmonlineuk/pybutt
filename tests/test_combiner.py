@@ -23,8 +23,6 @@ def mock_config():
     return SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="TargetTable",
         trusted_connection=True,
         retries=3,
     )
@@ -35,39 +33,75 @@ class TestTableCombineInit:
 
     def test_valid_pyodbc_engine(self, mock_config):
         combiner = TableCombine(
-            mock_config, sources=["dbo.A", "dbo.B"], engine="pyodbc"
+            mock_config,
+            sources=["dbo.A", "dbo.B"],
+            engine="pyodbc",
+            schema="dbo",
+            table="Target",
         )
         assert combiner.engine == "pyodbc"
         assert combiner.sources == ["dbo.A", "dbo.B"]
 
     def test_valid_duckdb_engine(self, mock_config):
-        combiner = TableCombine(mock_config, sources=["dbo.A"], engine="duckdb")
+        combiner = TableCombine(
+            mock_config,
+            sources=["dbo.A"],
+            engine="duckdb",
+            schema="dbo",
+            table="Target",
+        )
         assert combiner.engine == "duckdb"
 
     def test_invalid_engine_raises(self, mock_config):
         with pytest.raises(EngineSelectionError):
-            TableCombine(mock_config, sources=["dbo.A"], engine="mssql-python")
+            TableCombine(
+                mock_config,
+                sources=["dbo.A"],
+                engine="mssql-python",
+                schema="dbo",
+                table="Target",
+            )
 
     def test_invalid_engine_nonsense_raises(self, mock_config):
         with pytest.raises(EngineSelectionError):
-            TableCombine(mock_config, sources=["dbo.A"], engine="sqlite")
+            TableCombine(
+                mock_config,
+                sources=["dbo.A"],
+                engine="sqlite",
+                schema="dbo",
+                table="Target",
+            )
 
     def test_transaction_mode_default_is_batch(self, mock_config):
-        combiner = TableCombine(mock_config, sources=["dbo.A"])
+        combiner = TableCombine(
+            mock_config, sources=["dbo.A"], schema="dbo", table="Target"
+        )
         assert combiner.transaction_mode == TransactionMode.BATCH
 
     def test_transaction_mode_from_string(self, mock_config):
-        combiner = TableCombine(mock_config, sources=["dbo.A"], transaction_mode="file")
+        combiner = TableCombine(
+            mock_config,
+            sources=["dbo.A"],
+            transaction_mode="file",
+            schema="dbo",
+            table="Target",
+        )
         assert combiner.transaction_mode == TransactionMode.FILE
 
     def test_transaction_mode_enum(self, mock_config):
         combiner = TableCombine(
-            mock_config, sources=["dbo.A"], transaction_mode=TransactionMode.ROWGROUP
+            mock_config,
+            sources=["dbo.A"],
+            transaction_mode=TransactionMode.ROWGROUP,
+            schema="dbo",
+            table="Target",
         )
         assert combiner.transaction_mode == TransactionMode.ROWGROUP
 
     def test_sources_converted_to_list(self, mock_config):
-        combiner = TableCombine(mock_config, sources=iter(["dbo.X", "dbo.Y"]))
+        combiner = TableCombine(
+            mock_config, sources=iter(["dbo.X", "dbo.Y"]), schema="dbo", table="Target"
+        )
         assert combiner.sources == ["dbo.X", "dbo.Y"]
 
 
@@ -75,16 +109,22 @@ class TestParseSchemaTable:
     """Test _parse_schema_table helper."""
 
     def test_valid_schema_table(self, mock_config):
-        combiner = TableCombine(mock_config, sources=["dbo.A"])
+        combiner = TableCombine(
+            mock_config, sources=["dbo.A"], schema="dbo", table="Target"
+        )
         assert combiner._parse_schema_table("dbo.MyTable") == ("dbo", "MyTable")
 
     def test_invalid_no_dot(self, mock_config):
-        combiner = TableCombine(mock_config, sources=["dbo.A"])
+        combiner = TableCombine(
+            mock_config, sources=["dbo.A"], schema="dbo", table="Target"
+        )
         with pytest.raises(ValueError, match="Invalid source table name"):
             combiner._parse_schema_table("MyTable")
 
     def test_invalid_too_many_dots(self, mock_config):
-        combiner = TableCombine(mock_config, sources=["dbo.A"])
+        combiner = TableCombine(
+            mock_config, sources=["dbo.A"], schema="dbo", table="Target"
+        )
         with pytest.raises(ValueError, match="Invalid source table name"):
             combiner._parse_schema_table("catalog.dbo.MyTable")
 
@@ -93,7 +133,9 @@ class TestEnsureTargetExistsAndSchema:
     """Test _ensure_target_exists_and_schema logic."""
 
     def test_target_does_not_exist_creates_table(self, mock_config):
-        combiner = TableCombine(mock_config, sources=["staging.Src"])
+        combiner = TableCombine(
+            mock_config, sources=["staging.Src"], schema="dbo", table="Target"
+        )
 
         mock_cur = MagicMock()
         # First call: OBJECT_ID returns None (target doesn't exist)
@@ -105,16 +147,16 @@ class TestEnsureTargetExistsAndSchema:
         # Mock connection for commit
         mock_cur.connection = MagicMock()
 
-        result = combiner._ensure_target_exists_and_schema(
-            mock_cur, "staging.Src", "dbo", "Target"
-        )
+        result = combiner._ensure_target_exists_and_schema(mock_cur, "staging.Src")
 
         assert result == ["col_a", "col_b"]
         # Should have called commit after creating the table
         mock_cur.connection.commit.assert_called_once()
 
     def test_target_exists_schema_matches(self, mock_config):
-        combiner = TableCombine(mock_config, sources=["staging.Src"])
+        combiner = TableCombine(
+            mock_config, sources=["staging.Src"], schema="dbo", table="Target"
+        )
 
         mock_cur = MagicMock()
         # OBJECT_ID returns non-None (target exists)
@@ -134,14 +176,14 @@ class TestEnsureTargetExistsAndSchema:
 
         type(mock_cur).description = property(lambda self: side_effect_description())
 
-        result = combiner._ensure_target_exists_and_schema(
-            mock_cur, "staging.Src", "dbo", "Target"
-        )
+        result = combiner._ensure_target_exists_and_schema(mock_cur, "staging.Src")
 
         assert set(result) == {"col_a", "col_b"}
 
     def test_target_exists_schema_mismatch_raises(self, mock_config):
-        combiner = TableCombine(mock_config, sources=["staging.Src"])
+        combiner = TableCombine(
+            mock_config, sources=["staging.Src"], schema="dbo", table="Target"
+        )
 
         mock_cur = MagicMock()
         obj_id_row = MagicMock()
@@ -157,9 +199,7 @@ class TestEnsureTargetExistsAndSchema:
         type(mock_cur).description = property(lambda self: next(descriptions))
 
         with pytest.raises(SchemaMismatchError):
-            combiner._ensure_target_exists_and_schema(
-                mock_cur, "staging.Src", "dbo", "Target"
-            )
+            combiner._ensure_target_exists_and_schema(mock_cur, "staging.Src")
 
 
 class TestCombine:
@@ -168,7 +208,9 @@ class TestCombine:
     @patch.object(TableCombine, "connection_p")
     def test_combine_inserts_from_all_sources(self, mock_conn_p, mock_config):
         sources = ["staging.Part1", "staging.Part2", "staging.Part3"]
-        combiner = TableCombine(mock_config, sources=sources)
+        combiner = TableCombine(
+            mock_config, sources=sources, schema="dbo", table="FinalTable"
+        )
 
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
@@ -183,7 +225,7 @@ class TestCombine:
         with patch.object(
             combiner, "_ensure_target_exists_and_schema", return_value=["col_a"]
         ):
-            combiner.combine("dbo", "FinalTable")
+            combiner.combine()
 
         # 3 INSERT executes + 1 for _ensure (called on real object, but we patched it)
         # Check commit was called for each source
@@ -192,7 +234,9 @@ class TestCombine:
     @patch.object(TableCombine, "connection_p")
     def test_combine_rollback_on_error(self, mock_conn_p, mock_config):
         sources = ["staging.Part1"]
-        combiner = TableCombine(mock_config, sources=sources)
+        combiner = TableCombine(
+            mock_config, sources=sources, schema="dbo", table="FinalTable"
+        )
 
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
@@ -210,6 +254,6 @@ class TestCombine:
             combiner, "_ensure_target_exists_and_schema", return_value=["col_a"]
         ):
             with pytest.raises(RuntimeError, match="deadlock"):
-                combiner.combine("dbo", "FinalTable")
+                combiner.combine()
 
         mock_conn.rollback.assert_called_once()

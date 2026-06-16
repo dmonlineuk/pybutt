@@ -17,6 +17,7 @@ from pybutt.core.config import (
     MEM_SLEEP_DEFAULT,
     MEM_THRESHOLD_DEFAULT,
     ROWGROUP_SIZE_DEFAULT,
+    SCHEMA_DEFAULT,
     SqlConfig,
     quote_identifier,
     validate_engine,
@@ -51,7 +52,9 @@ class Exporter(SqlServerIOBase):
     def __init__(
         self,
         config: SqlConfig,
+        table: str,
         output_path,
+        schema: str = SCHEMA_DEFAULT,
         pk_column=None,
         columns=None,
         worker_count=1,
@@ -68,6 +71,8 @@ class Exporter(SqlServerIOBase):
         mem_cooldown: float = MEM_COOLDOWN_DEFAULT,
     ):
         super().__init__(config)
+        self.schema = validate_identifier(schema)
+        self.table = validate_identifier(table)
 
         self.mem_heartbeat = mem_heartbeat
         self.mem_gate = MemoryGate(mem_threshold, mem_sleep, mem_max_wait, mem_cooldown)

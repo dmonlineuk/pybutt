@@ -9,7 +9,6 @@ from pybutt.core.config import (
     ENCRYPT_DEFAULT,
     PACKET_SIZE_DEFAULT,
     RETRIES_DEFAULT,
-    SCHEMA_DEFAULT,
     TRUST_CERT_DEFAULT,
     TRUSTED_CONNECTION_DEFAULT,
     SqlConfig,
@@ -62,10 +61,8 @@ def parse_columns(columns: str | None) -> list[str] | None:
 def build_sql_config(
     server: str,
     database: str,
-    table: str,
     username: str | None,
     password: str | None,
-    schema: str = SCHEMA_DEFAULT,
     driver: str = DRIVER_DEFAULT,
     trusted_connection: bool = TRUSTED_CONNECTION_DEFAULT,
     trust_cert: bool = TRUST_CERT_DEFAULT,
@@ -86,8 +83,6 @@ def build_sql_config(
     return SqlConfig(
         server=server,
         database=database,
-        schema=schema,
-        table=table,
         username=username,
         password=password,
         driver=driver,
