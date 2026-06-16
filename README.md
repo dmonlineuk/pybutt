@@ -118,19 +118,24 @@ pybutt export \
 --trusted-connection,   -T      Use Windows integrated authentication
 --driver,               -D      ODBC driver name (default: ODBC Driver 18 for SQL Server)
 --trust-cert,           -c      Trust the SQL Server TLS certificate
---encrypt/--no-encrypt, -e/-n   Enable/disable encrypted transport (default: enabled)
+--encrypt/--no-encrypt          Enable/disable encrypted transport (default: enabled)
 --retries,              -r      Number of retry attempts for transient errors (default: 3)
---packet-size                   TDS packet size in bytes, 512–32767 (default: 16383)
+--packet-size                   TDS packet size in bytes, 512–32767 (default: 4096)
 --pk-column,            -P      Primary key column for deterministic partitioning
 --columns,              -C      Comma-separated list of columns to export (all by default)
+--parameters,           -a      Comma-separated list of parameter values to pass to a table-valued function (e.g. 12,'fred','1989')
 --worker-count,         -w      Number of worker processes (default: 1)
---file-count,           -f      Number of output Parquet files (default: 1; mutually exclusive with --rowgroups-per-file)
---rowgroups-per-file            Number of rowgroups per output file; file count is derived dynamically (mutually exclusive with --file-count)
+--file-count,           -f      Number of output Parquet files (default: 1)
 --rowgroup-size,        -R      Number of rows per rowgroup inside each Parquet file (default: 1048576)
---fetch-size,           -F      Cursor fetch size for pyodbc export (default: min(max(1024, rowgroup_size), 8192))
---engine,               -E      Export engine to use: duckdb, pyodbc, or mssql-python (default: duckdb)
---parameters                    Comma-separated list of parameter values to pass to a table-valued function (e.g. 12,'fred','1989')
---verbose,              -v      Show verbose logging output
+--fetch-size,           -F      Cursor fetch size for pyodbc export (default: 1000)
+--engine,               -e      Export engine to use: duckdb, pyodbc, or mssql-python (default: pyodbc)
+--mem-heartbeat                 Log process memory every N seconds (default: 30.0; 0 to disable)
+--mem-threshold                 System memory % at which workers are throttled (default: 85.0; 0 to disable)
+--mem-sleep                     Seconds to sleep per throttle check (default: 5.0)
+--mem-max-wait                  Max seconds to wait during memory throttling (default: 300.0)
+--mem-cooldown                  Seconds after a throttle event before re-checking (default: 30.0)
+--verbose,              -V      Show verbose logging output
+--help,                 -?      Show help and exit
 ```
 
 **Examples:**
@@ -147,7 +152,7 @@ pybutt export \
   --file-count 4
 ```
 
-Export using the pyodbc engine explicitly:
+Export using the duckdb engine:
 ```bash
 pybutt export \
   --server sqlserver.example.com \
@@ -155,7 +160,7 @@ pybutt export \
   --table Customers \
   --output-path ./exports/customers \
   --username dbuser \
-  --engine pyodbc
+  --engine duckdb
 ```
 
 Export using the mssql-python engine:
@@ -212,40 +217,43 @@ Import Parquet files into a SQL Server table:
 
 ```bash
 pybutt import \
+  ./exports/customers/dbo_Customers_manifest.json \
   --server YOUR_SERVER \
   --database YOUR_DB \
   --schema dbo \
   --table YOUR_TABLE \
-  --input-path ./export_data \
-  --manifest-filename your_table_manifest.json \
   --username your_user
 ```
 
 **Import Options:**
 
 ```
+manifest_path                         Path to the input manifest file (positional, required)
 --server,                     -s      SQL Server hostname or instance (required)
 --database,                   -d      Target database (required)
 --schema,                     -S      Table schema (default: dbo)
 --table,                      -t      Table name (required)
---input-path,                 -i      Directory containing Parquet files (required)
---manifest-filename,          -m      Manifest file name (required)
---output-manifest-filename,   -o      Override temporary worker manifest filename during multi-worker import
+--imported-manifest-filename, -o      Override the import worker manifest filename
 --username,                   -u      SQL Server username
 --password,                   -p      SQL Server password (prompted if not provided)
 --trusted-connection,         -T      Use Windows integrated authentication
 --driver,                     -D      ODBC driver name (default: ODBC Driver 18 for SQL Server)
 --trust-cert,                 -c      Trust the SQL Server TLS certificate
---encrypt/--no-encrypt,       -e/-n   Enable/disable encrypted transport (default: enabled)
+--encrypt/--no-encrypt                Enable/disable encrypted transport (default: enabled)
 --retries,                    -r      Number of retry attempts for transient errors (default: 3)
---packet-size                         TDS packet size in bytes, 512–32767 (default: 16383)
+--packet-size                         TDS packet size in bytes, 512–32767 (default: 4096)
 --worker-count,               -w      Number of parallel import threads (default: 1)
---batch-size,                 -b      Rows per batch insert (default: 1000; mssql-python: 1048576)
---engine,                     -E      Import engine to use: duckdb, pyodbc, or mssql-python (default: pyodbc)
---transaction-mode,           -M      Transaction scope: row, batch (default), rowgroup, file
+--batch-size,                 -b      Rows per batch insert (default: 1000)
+--engine,                     -e      Import engine to use: duckdb, pyodbc, or mssql-python (default: mssql-python)
+--transaction-mode,           -M      Transaction scope: batch, rowgroup (default), file
 --cci/--no-cci                        Create a clustered columnstore index on per-worker temp tables (default: enabled)
---delete-files,               -x      Delete source parquet files and the manifest after import
---verbose,                    -v      Show verbose logging output
+--mem-heartbeat                       Log process memory every N seconds (default: 30.0; 0 to disable)
+--mem-threshold                       System memory % at which workers are throttled (default: 85.0; 0 to disable)
+--mem-sleep                           Seconds to sleep per throttle check (default: 5.0)
+--mem-max-wait                        Max seconds to wait during memory throttling (default: 300.0)
+--mem-cooldown                        Seconds after a throttle event before re-checking (default: 30.0)
+--verbose,                    -V      Show verbose logging output
+--help,                       -?      Show help and exit
 ```
 
 **Columnstore on temporary tables:**
@@ -269,49 +277,45 @@ Notes:
 
 **Examples:**
 
-Basic import (uses BATCH transaction mode by default):
+Basic import (uses rowgroup transaction mode by default):
 ```bash
 pybutt import \
+  ./exports/customers/dbo_Customers_manifest.json \
   --server sqlserver.example.com \
   --database MyDatabase \
   --table Customers \
-  --input-path ./exports/customers \
-  --manifest-filename customers_manifest.json \
   --username dbuser
 ```
 
-Import using the duckdb engine explicitly:
+Import using the pyodbc engine:
 ```bash
 pybutt import \
+  ./exports/customers/dbo_Customers_manifest.json \
   --server sqlserver.example.com \
   --database MyDatabase \
   --table Customers \
-  --input-path ./exports/customers \
-  --manifest-filename customers_manifest.json \
+  --username dbuser \
+  --engine pyodbc
+```
+
+Import using the duckdb engine:
+```bash
+pybutt import \
+  ./exports/customers/dbo_Customers_manifest.json \
+  --server sqlserver.example.com \
+  --database MyDatabase \
+  --table Customers \
   --username dbuser \
   --engine duckdb
 ```
 
-Import using the mssql-python engine (native bulk insert for faster imports):
+High-throughput import with larger batches (batch mode):
 ```bash
 pybutt import \
-  --server sqlserver.example.com \
-  --database MyDatabase \
-  --table Customers \
-  --input-path ./exports/customers \
-  --manifest-filename customers_manifest.json \
-  --username dbuser \
-  --engine mssql-python
-```
-
-High-throughput import with larger batches (BATCH mode):
-```bash
-pybutt import \
+  ./imports/orders/dbo_Orders_manifest.json \
   --server sqlserver.example.com \
   --database MyDatabase \
   --table Orders \
-  --input-path ./imports/orders \
-  --manifest-filename orders_manifest.json \
   --username dbuser \
   --worker-count 4 \
   --batch-size 5000 \
@@ -319,40 +323,26 @@ pybutt import \
   --verbose
 ```
 
-Import with row group transactions (for rowgroup granularity):
+Import with batch transactions (per-batch retries):
 ```bash
 pybutt import \
+  ./imports/data/dbo_LargeTable_manifest.json \
   --server sqlserver.example.com \
   --database MyDatabase \
   --table LargeTable \
-  --input-path ./imports/data \
-  --manifest-filename data_manifest.json \
   --username dbuser \
-  --transaction-mode rowgroup
+  --transaction-mode batch
 ```
 
 Import with file-level transactions (all-or-nothing for critical data):
 ```bash
 pybutt import \
+  ./imports/financials/dbo_FinancialData_manifest.json \
   --server sqlserver.example.com \
   --database MyDatabase \
   --table FinancialData \
-  --input-path ./imports/financials \
-  --manifest-filename financials_manifest.json \
   --username dbuser \
   --transaction-mode file
-```
-
-Import with row-level transactions (minimum speed, no safety - for testing only):
-```bash
-pybutt import \
-  --server sqlserver.example.com \
-  --database MyDatabase \
-  --table LargeTable \
-  --input-path ./imports/data \
-  --manifest-filename data_manifest.json \
-  --username dbuser \
-  --transaction-mode row
 ```
 
 #### Combine Command
@@ -500,15 +490,15 @@ exporter = Exporter(
 exporter.perform_work()
 ```
 
-With rowgroups-per-file (file count derived dynamically):
+With multiple workers and files:
 
 ```python
 exporter = Exporter(
     config=config,
     output_path=Path("./exports/orders"),
     worker_count=4,
+    file_count=4,                            # Distribute across 4 output files
     rowgroup_size=1_048_576,                 # 1M rows per rowgroup
-    rowgroups_per_file=5,                    # 5 rowgroups per file (~5M rows each)
 )
 
 exporter.perform_work()
@@ -516,7 +506,7 @@ exporter.perform_work()
 
 #### Importing Data
 
-**Default (batch-level transactions):**
+**Default (rowgroup-level transactions):**
 ```python
 from pybutt import TransactionMode
 
@@ -524,16 +514,16 @@ importer = Importer(
     config=config,
     input_path=Path("./exports/customers"),
     manifest_filename="customers_manifest.json",
-    worker_count=4,                          # Number of parallel threads
-    batch_size=1000,                         # Rows per batch
-    transaction_mode=TransactionMode.BATCH,  # Each batch in its own transaction (default, recommended)
+    worker_count=4,                              # Number of parallel threads
+    batch_size=1000,                             # Rows per batch
+    transaction_mode=TransactionMode.ROWGROUP,   # Each row group in its own transaction (default)
 )
 
 importer.perform_work()
 print("Import completed successfully!")
 ```
 
-**With row group transactions (rowgroup granularity):**
+**With batch-level transactions (per-batch retries):**
 ```python
 importer = Importer(
     config=config,
@@ -541,7 +531,7 @@ importer = Importer(
     manifest_filename="orders_manifest.json",
     worker_count=4,
     batch_size=5000,
-    transaction_mode=TransactionMode.ROWGROUP,  # Each row group in its own transaction
+    transaction_mode=TransactionMode.BATCH,  # Each batch in its own transaction
 )
 
 importer.perform_work()
@@ -556,20 +546,6 @@ importer = Importer(
     worker_count=4,
     batch_size=1000,
     transaction_mode=TransactionMode.FILE,   # Entire file in one transaction
-)
-
-importer.perform_work()
-```
-
-**With row-level transactions (minimum speed, no safety - for testing only):**
-```python
-importer = Importer(
-    config=config,
-    input_path=Path("./exports/customers"),
-    manifest_filename="customers_manifest.json",
-    worker_count=4,
-    batch_size=1000,
-    transaction_mode=TransactionMode.ROW,    # Each row commits individually (no retries, autocommit)
 )
 
 importer.perform_work()
@@ -618,7 +594,7 @@ importer = Importer(
     manifest_filename="dbo_LargeTable_manifest.json",
     worker_count=4,
     batch_size=5000,
-    transaction_mode=TransactionMode.BATCH,  # Batch-level transactions for balance
+    transaction_mode=TransactionMode.ROWGROUP,  # Rowgroup-level transactions (default)
 )
 importer.perform_work()
 print("✓ Import complete")
@@ -676,7 +652,7 @@ manifest:
 
 - **Export**: Increase `--worker-count` and `--file-count` for large tables (use values matching your CPU core count)
 - **Import**: Use `--worker-count` up to your CPU core count and adjust `--batch-size` (higher values = fewer database round trips)
-- **mssql-python engine**: Use `--engine mssql-python` for imports to leverage native bulk insert (`bulkcopy`) which is significantly faster than parameterized `INSERT` statements used by pyodbc. Because each `bulkcopy` batch closes a columnstore rowgroup, `--batch-size` defaults to `1048576` for this engine (a full rowgroup) rather than `1000` — see [docs/defaults.md](docs/defaults.md)
+- **mssql-python engine**: The default import engine (`mssql-python`) uses native bulk insert (`bulkcopy`) which is significantly faster than parameterized `INSERT` statements used by pyodbc
 - **Primary Key Partitioning**: Use `--pk-column` for deterministic partitioning when re-importing the same data
 - **Encryption**: Use `--no-encrypt` only in secure networks to reduce overhead
 
@@ -686,35 +662,30 @@ The `--transaction-mode` option controls how data is committed during import and
 
 | Mode | Behavior | Retry Scope | Best For | Pros | Cons |
 |------|----------|-------------|----------|------|------|
-| **batch** | Each batch of `batch_size` rows commits together | Per-batch retry | **Recommended for most use cases** | Fast, limited lock duration, failed batches retry independently | Rare edge case: partial batch on non-retryable error |
-| **rowgroup** | Each Parquet row group commits together | Per-rowgroup retry | Rowgroup granularity with safe retries | Row group boundary safety, independent rowgroup retries | Longer locks than batch mode, fewer retry opportunities |
+| **batch** | Each batch of `batch_size` rows commits together | Per-batch retry | High throughput with per-batch retries | Fast, limited lock duration, failed batches retry independently | Rare edge case: partial batch on non-retryable error |
+| **rowgroup** | Each Parquet row group commits together | Per-rowgroup retry | **Default — recommended for most use cases** | Row group boundary safety, independent rowgroup retries | Longer locks than batch mode, fewer retry opportunities |
 | **file** | Entire file in one transaction | Entire file retry | Production, critical data | All-or-nothing atomicity, complete data integrity | Can hold locks longer on large files, if failure occurs entire file retries |
-| **row** | Each row auto-commits immediately | No retries (unsafe with autocommit) | Non-critical data, testing - **Not recommended** | Zero lock contention | Partial loads on error, no rollback, autocommit prevents safe retries |
 
 **Retry Behavior:**
 - **batch/rowgroup modes**: When a batch or rowgroup fails, only that unit is rolled back and retried (up to `--retries` times). Already-committed units remain intact.
 - **file mode**: If any part of the file fails, the entire file operation is retried. Previously committed batches are preserved by the transaction.
-- **row mode**: No retries possible due to autocommit. Each row commits immediately, so failed rows cannot be retried without risking duplication.
 
 **Recommended Configuration:**
 ```bash
 pybutt import \
+  ./data/dbo_YOUR_TABLE_manifest.json \
   --server YOUR_SERVER \
   --database YOUR_DB \
   --table YOUR_TABLE \
-  --input-path ./data \
-  --manifest-filename manifest.json \
   --username your_user \
-  --transaction-mode batch \
   --batch-size 5000 \
   --worker-count 4
 ```
 
 **Choosing a mode:**
-- **Default**: Use `batch` (default) — minimal data safety and performance, but better chance of limited lock duration
-- **Production/Critical Data with High Volume**: Use `rowgroup` for a balance between data safety, locking/blocking and speed
-- **Safety-Critical (Small Files)**: Use `file` for complete all-or-nothing atomicity per file, but high chance of locking/blocking
-- **Performance-Only, Non-Critical**: Use `row` for implicit transactions to prevent locking, but slow, and no data safety. **Not recommended**
+- **Default**: Use `rowgroup` (default) — balance between data safety, locking/blocking and speed
+- **High Throughput**: Use `batch` for per-batch retries and limited lock duration
+- **Safety-Critical (Small Files)**: Use `file` for complete all-or-nothing atomicity per file, but higher chance of locking/blocking
 
 **Retry Configuration:**
 Use `--retries` (default: 3) to control retry attempts. This applies at the transaction scope level:
