@@ -7,10 +7,11 @@ import pytest
 
 from pybutt.core.base import SqlServerIOBase
 from pybutt.core.config import (
-    DEFAULT_IMPORT_BATCH_SIZE,
+    BATCH_SIZE_DEFAULT,
+    FETCH_SIZE_DEFAULT,
+    PACKET_SIZE_DEFAULT,
     SqlConfig,
     quote_identifier,
-    resolve_engine_default,
     validate_identifier,
 )
 from pybutt.exceptions import InvalidIdentifierError, MissingManifestEntryError
@@ -35,8 +36,6 @@ def test_sqlserverio_base_builds_dsn_for_trusted_connection():
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
         trust_cert=True,
         encrypt=True,
@@ -54,8 +53,6 @@ def test_sqlserverio_base_builds_dsn_for_username_password():
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         username="user",
         password="secret",
         trusted_connection=False,
@@ -74,23 +71,26 @@ def test_exporter_invalid_file_count(monkeypatch):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
 
     monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
 
     with pytest.raises(ValueError, match="file_count must be at least 1"):
-        Exporter(config=config, output_path=Path("./out"), worker_count=1, file_count=0)
+        Exporter(
+            config=config,
+            schema="dbo",
+            table="MyTable",
+            output_path=Path("./out"),
+            worker_count=1,
+            file_count=0,
+        )
 
 
 def test_exporter_invalid_engine(monkeypatch):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
 
@@ -99,6 +99,8 @@ def test_exporter_invalid_engine(monkeypatch):
     with pytest.raises(ValueError, match="engine must be one of"):
         Exporter(
             config=config,
+            schema="dbo",
+            table="MyTable",
             output_path=Path("./out"),
             worker_count=1,
             file_count=1,
@@ -110,35 +112,35 @@ def test_exporter_fetch_size_default(monkeypatch):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
 
     monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
     exporter = Exporter(
         config=config,
+        schema="dbo",
+        table="MyTable",
         output_path=Path("./out"),
         worker_count=1,
         file_count=1,
         rowgroup_size=1_048_576,
     )
 
-    assert exporter.fetch_size == 8192
+    assert exporter.fetch_size == FETCH_SIZE_DEFAULT
 
 
 def test_exporter_fetch_size_override(monkeypatch):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
 
     monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
     exporter = Exporter(
         config=config,
+        schema="dbo",
+        table="MyTable",
         output_path=Path("./out"),
         worker_count=1,
         file_count=1,
@@ -153,14 +155,14 @@ def test_exporter_source_reference_with_parameters(monkeypatch):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="export",
-        table="tvf_users",
         trusted_connection=True,
     )
 
     monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
     exporter = Exporter(
         config=config,
+        schema="export",
+        table="tvf_users",
         output_path=Path("./out"),
         worker_count=1,
         file_count=1,
@@ -178,8 +180,6 @@ def test_exporter_partition_meta_falls_back_to_count(monkeypatch):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyView",
         trusted_connection=True,
     )
 
@@ -207,6 +207,8 @@ def test_exporter_partition_meta_falls_back_to_count(monkeypatch):
     monkeypatch.setattr(Exporter, "connection_d", lambda self: DummyConnection())
     exporter = Exporter(
         config=config,
+        schema="dbo",
+        table="MyView",
         output_path=Path("./out"),
         worker_count=1,
         file_count=1,
@@ -220,8 +222,6 @@ def test_exporter_partition_meta_uses_parameters_for_count(monkeypatch):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="export",
-        table="tvf_users",
         trusted_connection=True,
     )
 
@@ -250,6 +250,8 @@ def test_exporter_partition_meta_uses_parameters_for_count(monkeypatch):
     monkeypatch.setattr(Exporter, "connection_d", lambda self: DummyConnection())
     exporter = Exporter(
         config=config,
+        schema="export",
+        table="tvf_users",
         output_path=Path("./out"),
         worker_count=1,
         file_count=1,
@@ -264,14 +266,14 @@ def test_exporter_writes_manifest_version_2(monkeypatch, tmp_path):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
 
     monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
     exporter = Exporter(
         config=config,
+        schema="dbo",
+        table="MyTable",
         output_path=tmp_path,
         worker_count=1,
         file_count=1,
@@ -321,14 +323,14 @@ def test_pyodbc_export_buffers_rows_for_parquet_rowgroups(monkeypatch, tmp_path)
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
 
     monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
     exporter = Exporter(
         config=config,
+        schema="dbo",
+        table="MyTable",
         output_path=tmp_path,
         worker_count=1,
         file_count=1,
@@ -366,14 +368,14 @@ def test_duckdb_export_uses_rowgroup_size(tmp_path, monkeypatch):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
 
     monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
     exporter = Exporter(
         config=config,
+        schema="dbo",
+        table="MyTable",
         output_path=tmp_path,
         worker_count=1,
         file_count=1,
@@ -405,14 +407,14 @@ def test_importer_invalid_engine():
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
 
     with pytest.raises(ValueError, match="engine must be one of"):
         Importer(
             config=config,
+            schema="dbo",
+            table="MyTable",
             input_path=Path("./data"),
             manifest_filename="manifest.json",
             engine="invalid",
@@ -423,14 +425,17 @@ def test_exporter_build_partition_query_without_pk(monkeypatch):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
 
     monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
     exporter = Exporter(
-        config=config, output_path=Path("./out"), worker_count=1, file_count=4
+        config=config,
+        schema="dbo",
+        table="MyTable",
+        output_path=Path("./out"),
+        worker_count=1,
+        file_count=4,
     )
     exporter.partition_count = 4
     exporter.chunk_size = 25
@@ -443,14 +448,14 @@ def test_exporter_build_partition_query_with_pk(monkeypatch):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
 
     monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
     exporter = Exporter(
         config=config,
+        schema="dbo",
+        table="MyTable",
         output_path=Path("./out"),
         pk_column="id",
         columns=["id", "name"],
@@ -470,8 +475,6 @@ def test_importer_load_manifest(tmp_path):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
     input_path = tmp_path / "data"
@@ -485,6 +488,8 @@ def test_importer_load_manifest(tmp_path):
 
     importer = Importer(
         config=config,
+        schema="dbo",
+        table="MyTable",
         input_path=input_path,
         manifest_filename="manifest.json",
     )
@@ -500,8 +505,6 @@ def test_importer_load_manifest_missing_file(tmp_path):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
     input_path = tmp_path / "data"
@@ -511,6 +514,8 @@ def test_importer_load_manifest_missing_file(tmp_path):
 
     importer = Importer(
         config=config,
+        schema="dbo",
+        table="MyTable",
         input_path=input_path,
         manifest_filename="manifest.json",
     )
@@ -522,12 +527,12 @@ def test_importer_default_manifest_filename():
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
     importer = Importer(
         config=config,
+        schema="dbo",
+        table="MyTable",
         input_path=Path("./data"),
         manifest_filename=None,
     )
@@ -538,12 +543,12 @@ def test_importer_make_temp_table_name_local():
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="users",
         trusted_connection=True,
     )
     importer = Importer(
         config=config,
+        schema="dbo",
+        table="users",
         input_path=Path("./data"),
         manifest_filename="manifest.json",
     )
@@ -556,12 +561,12 @@ def test_importer_make_columnstore_index_name():
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="users",
         trusted_connection=True,
     )
     importer = Importer(
         config=config,
+        schema="dbo",
+        table="users",
         input_path=Path("./data"),
         manifest_filename="manifest.json",
     )
@@ -581,14 +586,15 @@ def test_create_temp_tables_creates_columnstore_index_by_default(monkeypatch):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
     importer = Importer(
         config=config,
+        schema="dbo",
+        table="MyTable",
         input_path=Path("./data"),
         manifest_filename="manifest.json",
+        engine="pyodbc",
     )
 
     fake_connection, fake_cursor = _make_fake_connection()
@@ -614,12 +620,12 @@ def test_create_temp_tables_skips_columnstore_index_when_disabled(monkeypatch):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
     importer = Importer(
         config=config,
+        schema="dbo",
+        table="MyTable",
         input_path=Path("./data"),
         manifest_filename="manifest.json",
         create_cci=False,
@@ -627,7 +633,7 @@ def test_create_temp_tables_skips_columnstore_index_when_disabled(monkeypatch):
 
     fake_connection, fake_cursor = _make_fake_connection()
     monkeypatch.setattr(
-        importer, "connection_p", lambda autocommit=False: fake_connection
+        importer, "connection_m", lambda autocommit=False: fake_connection
     )
 
     importer._create_temp_tables(2)
@@ -642,12 +648,12 @@ def test_importer_validate_schema_mismatch():
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
     importer = Importer(
         config=config,
+        schema="dbo",
+        table="MyTable",
         input_path=Path("./data"),
         manifest_filename="manifest.json",
     )
@@ -659,14 +665,14 @@ def test_importer_write_temp_manifest(tmp_path):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
     input_path = tmp_path / "data"
     input_path.mkdir()
     importer = Importer(
         config=config,
+        schema="dbo",
+        table="MyTable",
         input_path=input_path,
         manifest_filename="manifest.json",
     )
@@ -690,8 +696,6 @@ def test_importer_perform_work_with_multiple_workers(monkeypatch, tmp_path):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
     input_path = tmp_path / "data"
@@ -704,6 +708,8 @@ def test_importer_perform_work_with_multiple_workers(monkeypatch, tmp_path):
 
     importer = Importer(
         config=config,
+        schema="dbo",
+        table="MyTable",
         input_path=input_path,
         manifest_filename="manifest.json",
         worker_count=2,
@@ -738,47 +744,10 @@ def test_importer_perform_work_with_multiple_workers(monkeypatch, tmp_path):
     assert manifest_written["tables"] == created
 
 
-def test_importer_perform_work_deletes_original_files_and_manifest(
-    monkeypatch, tmp_path
-):
-    config = SqlConfig(
-        server="localhost",
-        database="TestDb",
-        schema="dbo",
-        table="MyTable",
-        trusted_connection=True,
-    )
-    input_path = tmp_path / "data"
-    input_path.mkdir()
-    filenames = ["a.parquet", "b.parquet"]
-    for name in filenames:
-        (input_path / name).write_text("empty")
-    manifest_path = input_path / "manifest.json"
-    manifest_path.write_text(json.dumps(filenames))
-
-    importer = Importer(
-        config=config,
-        input_path=input_path,
-        manifest_filename="manifest.json",
-        delete_files=True,
-    )
-
-    monkeypatch.setattr(
-        importer, "import_file", lambda filename, target_table=None: None
-    )
-
-    importer.perform_work()
-
-    assert not any((input_path / name).exists() for name in filenames)
-    assert not manifest_path.exists()
-
-
 def test_importer_multi_worker_defaults_to_local_temp_tables(monkeypatch, tmp_path):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
     input_path = tmp_path / "data"
@@ -786,6 +755,8 @@ def test_importer_multi_worker_defaults_to_local_temp_tables(monkeypatch, tmp_pa
 
     importer = Importer(
         config=config,
+        schema="dbo",
+        table="MyTable",
         input_path=input_path,
         manifest_filename="manifest.json",
         worker_count=2,
@@ -824,14 +795,14 @@ def test_exporter_accepts_mssql_python_engine(monkeypatch):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
 
     monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
     exporter = Exporter(
         config=config,
+        schema="dbo",
+        table="MyTable",
         output_path=Path("./out"),
         worker_count=1,
         file_count=1,
@@ -845,13 +816,13 @@ def test_importer_accepts_mssql_python_engine(tmp_path):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
 
     importer = Importer(
         config=config,
+        schema="dbo",
+        table="MyTable",
         input_path=tmp_path,
         manifest_filename="manifest.json",
         engine="mssql-python",
@@ -864,53 +835,41 @@ def _import_config():
     return SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
     )
-
-
-def test_resolve_engine_default_explicit_value_wins():
-    assert resolve_engine_default("batch_size", "mssql-python", 42, 1000) == 42
-
-
-def test_resolve_engine_default_uses_engine_override():
-    assert resolve_engine_default("batch_size", "mssql-python", None, 1000) == 1_048_576
-
-
-def test_resolve_engine_default_falls_back_for_other_engines():
-    assert resolve_engine_default("batch_size", "pyodbc", None, 1000) == 1000
-
-
-def test_resolve_engine_default_unknown_tunable_uses_fallback():
-    assert resolve_engine_default("nope", "mssql-python", None, 7) == 7
 
 
 def test_importer_default_batch_size_pyodbc(tmp_path):
     importer = Importer(
         config=_import_config(),
+        schema="dbo",
+        table="MyTable",
         input_path=tmp_path,
         manifest_filename="manifest.json",
         engine="pyodbc",
     )
 
-    assert importer.batch_size == DEFAULT_IMPORT_BATCH_SIZE
+    assert importer.batch_size == BATCH_SIZE_DEFAULT
 
 
 def test_importer_default_batch_size_mssql_python(tmp_path):
     importer = Importer(
         config=_import_config(),
+        schema="dbo",
+        table="MyTable",
         input_path=tmp_path,
         manifest_filename="manifest.json",
         engine="mssql-python",
     )
 
-    assert importer.batch_size == 1_048_576
+    assert importer.batch_size == BATCH_SIZE_DEFAULT
 
 
 def test_importer_explicit_batch_size_overrides_engine_default(tmp_path):
     importer = Importer(
         config=_import_config(),
+        schema="dbo",
+        table="MyTable",
         input_path=tmp_path,
         manifest_filename="manifest.json",
         engine="mssql-python",
@@ -925,20 +884,20 @@ def test_exporter_fetch_size_no_engine_override(monkeypatch):
     monkeypatch.setattr(Exporter, "partition_meta", lambda self: None)
     exporter = Exporter(
         config=config,
+        schema="dbo",
+        table="MyTable",
         output_path=Path("./out"),
         rowgroup_size=1_048_576,
         engine="mssql-python",
     )
 
-    assert exporter.fetch_size == 8192
+    assert exporter.fetch_size == FETCH_SIZE_DEFAULT
 
 
 def test_connection_m_builds_correct_connection_string(monkeypatch):
     config = SqlConfig(
         server="myserver.example.com",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         username="user",
         password="secret",
         trusted_connection=False,
@@ -974,8 +933,6 @@ def test_connection_m_trusted_connection(monkeypatch):
     config = SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
         trust_cert=False,
         encrypt=False,
@@ -1006,21 +963,17 @@ def test_connection_dsn_includes_default_packet_size():
     config = SqlConfig(
         server="myserver",
         database="TestDb",
-        schema="dbo",
-        table="T",
         username="u",
         password="p",
     )
     base = SqlServerIOBase(config)
-    assert "PacketSize=16383" in base.dsn
+    assert f"PacketSize={PACKET_SIZE_DEFAULT}" in base.dsn
 
 
 def test_connection_dsn_custom_packet_size():
     config = SqlConfig(
         server="myserver",
         database="TestDb",
-        schema="dbo",
-        table="T",
         username="u",
         password="p",
         packet_size=8192,
@@ -1033,8 +986,6 @@ def test_connection_m_includes_packet_size(monkeypatch):
     config = SqlConfig(
         server="myserver",
         database="TestDb",
-        schema="dbo",
-        table="T",
         username="u",
         password="p",
         packet_size=4096,

@@ -225,3 +225,4 @@ test-export.sh
 test-import.sh
 test-merge.sh
 *.log
+old_tests/

@@ -2,6 +2,7 @@ from collections.abc import Iterable
 
 from pybutt.core.base import SqlServerIOBase
 from pybutt.core.config import (
+    SCHEMA_DEFAULT,
     TransactionMode,
     coerce_transaction_mode,
     quote_identifier,
@@ -11,11 +12,11 @@ from pybutt.core.config import (
 from pybutt.core.logobs import context, get_logger
 from pybutt.exceptions import SchemaMismatchError
 
-logger = get_logger("merger")
+logger = get_logger("combiner")
 
 
-class TableMerger(SqlServerIOBase):
-    """Merge multiple SQL tables into a single target table.
+class TableCombine(SqlServerIOBase):
+    """Combine multiple SQL tables into a single target table.
 
     Sources should be provided as fully-qualified schema.table strings.
     """
@@ -23,11 +24,15 @@ class TableMerger(SqlServerIOBase):
     def __init__(
         self,
         config,
+        table: str,
         sources: Iterable[str],
+        schema: str = SCHEMA_DEFAULT,
         transaction_mode: TransactionMode = TransactionMode.BATCH,
         engine: str = "pyodbc",
     ):
         super().__init__(config)
+        self.schema = validate_identifier(schema)
+        self.table = validate_identifier(table)
         self.sources: list[str] = list(sources)
         self.transaction_mode = coerce_transaction_mode(transaction_mode)
         validate_engine(engine, allowed=frozenset({"pyodbc", "duckdb"}))
@@ -42,18 +47,16 @@ class TableMerger(SqlServerIOBase):
         validate_identifier(table)
         return schema, table
 
-    def _ensure_target_exists_and_schema(
-        self, cur, first_source: str, target_schema: str, target_table: str
-    ):
+    def _ensure_target_exists_and_schema(self, cur, first_source: str):
         # If target exists, validate schema equality;
         # otherwise create from first source (no rows)
-        cur.execute("SELECT OBJECT_ID(?)", (f"{target_schema}.{target_table}",))
+        cur.execute("SELECT OBJECT_ID(?)", (f"{self.schema}.{self.table}",))
         exists = cur.fetchone()[0] is not None
 
         # Get column list for source
         src_schema, src_table = self._parse_schema_table(first_source)
         q_src = f"{quote_identifier(src_schema)}.{quote_identifier(src_table)}"
-        q_tgt = f"{quote_identifier(target_schema)}.{quote_identifier(target_table)}"
+        q_tgt = f"{quote_identifier(self.schema)}.{quote_identifier(self.table)}"
         cur.execute(f"SELECT TOP 0 * FROM {q_src}")
         src_cols = [c[0] for c in cur.description]
 
@@ -70,13 +73,13 @@ class TableMerger(SqlServerIOBase):
         if set(src_cols) != set(tgt_cols):
             raise SchemaMismatchError(
                 "Source and target schemas differ for "
-                f"{first_source} vs {target_schema}.{target_table}"
+                f"{first_source} vs {self.schema}.{self.table}"
             )
 
         return src_cols
 
-    def merge(self, target_schema: str, target_table: str):
-        """Merge all source tables into the target table.
+    def combine(self):
+        """Combine all source tables into the target table.
 
         Implementation: create target if missing using first source schema, then
         run `INSERT INTO target SELECT * FROM source` for each source.
@@ -86,13 +89,13 @@ class TableMerger(SqlServerIOBase):
                 # Ensure first source schema compatible / create target
                 first_source = self.sources[0]
                 self._ensure_target_exists_and_schema(
-                    cur, first_source, target_schema, target_table
+                    cur, first_source, self.schema, self.table
                 )
 
                 # Insert from each source
                 q_tgt = (
-                    f"{quote_identifier(target_schema)}"
-                    f".{quote_identifier(target_table)}"
+                    f"{quote_identifier(self.schema)}"
+                    f".{quote_identifier(self.table)}"
                 )
                 for src in self.sources:
                     src_schema, src_table = self._parse_schema_table(src)
@@ -100,10 +103,10 @@ class TableMerger(SqlServerIOBase):
                         f"{quote_identifier(src_schema)}.{quote_identifier(src_table)}"
                     )
                     logger.info(
-                        "Merging "
+                        "Combining "
                         + context(
                             source=f"{src_schema}.{src_table}",
-                            target=f"{target_schema}.{target_table}",
+                            target=f"{self.schema}.{self.table}",
                         )
                     )
                     try:
@@ -113,4 +116,4 @@ class TableMerger(SqlServerIOBase):
                         conn.rollback()
                         raise
 
-        logger.info("Table merge completed")
+        logger.info("Table combine completed")

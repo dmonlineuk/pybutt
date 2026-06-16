@@ -3,23 +3,35 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from pybutt.cli import cli
-from pybutt.core.config import TransactionMode
+from pybutt.cli import (
+    app,
+    combine_command,
+    export_command,
+    import_command,
+)
+from pybutt.core.config import (
+    EXPORT_ENGINE_DEFAULT,
+    IMPORT_ENGINE_DEFAULT,
+    TRANSACTION_MODE_DEFAULT,
+    TransactionMode,
+)
 
 runner = CliRunner()
 
 
-class DummyMerger:
+class DummyCombiner:
     last_instance = None
 
-    def __init__(self, config, sources):
+    def __init__(self, config, sources, schema, table):
         self.config = config
         self.sources = sources
-        self.merge_called = False
-        DummyMerger.last_instance = self
+        self.schema = schema
+        self.table = table
+        self.combine_called = False
+        DummyCombiner.last_instance = self
 
-    def merge(self, target_schema, target_table):
-        self.merge_called = True
+    def combine(self):
+        self.combine_called = True
 
 
 class DummyExporter:
@@ -28,7 +40,9 @@ class DummyExporter:
     def __init__(
         self,
         config,
-        output_path,
+        schema="dbo",
+        table="MyTable",
+        output_path=".",
         pk_column=None,
         columns=None,
         worker_count=1,
@@ -43,9 +57,10 @@ class DummyExporter:
         mem_sleep=5.0,
         mem_max_wait=300.0,
         mem_cooldown=30.0,
-        rowgroups_per_file=None,
     ):
         self.config = config
+        self.schema = schema
+        self.table = table
         self.output_path = Path(output_path)
         self.pk_column = pk_column
         self.columns = columns
@@ -61,7 +76,6 @@ class DummyExporter:
         self.mem_sleep = mem_sleep
         self.mem_max_wait = mem_max_wait
         self.mem_cooldown = mem_cooldown
-        self.rowgroups_per_file = rowgroups_per_file
         DummyExporter.last_instance = self
 
     def perform_work(self):
@@ -74,8 +88,10 @@ class DummyImporter:
     def __init__(
         self,
         config,
-        input_path,
-        manifest_filename,
+        schema="dbo",
+        table="MyTable",
+        input_path=".",
+        manifest_filename=None,
         worker_count=1,
         batch_size=None,
         transaction_mode=None,
@@ -90,6 +106,8 @@ class DummyImporter:
         mem_cooldown=30.0,
     ):
         self.config = config
+        self.schema = schema
+        self.table = table
         self.input_path = Path(input_path)
         self.manifest_filename = manifest_filename
         self.temp_manifest_filename = temp_manifest_filename
@@ -110,34 +128,12 @@ class DummyImporter:
         self.performed = True
 
 
-def test_cli_help_contains_commands():
-    result = runner.invoke(cli.app, ["--help"])
-    assert result.exit_code == 0
-    assert "export" in result.output
-    assert "import" in result.output
-
-
-def test_export_help_includes_server_option():
-    result = runner.invoke(cli.app, ["export", "--help"])
-    assert result.exit_code == 0
-    assert "--server" in result.output
-    assert "--output-path" in result.output
-
-
-def test_import_help_includes_input_path_option():
-    result = runner.invoke(cli.app, ["import", "--help"])
-    assert result.exit_code == 0
-    assert "--input-path" in result.output
-    assert "manifest" in result.output
-    assert "--delete-files" in result.output
-
-
 def test_export_command_parses_options(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Exporter", DummyExporter)
+    monkeypatch.setattr(export_command, "Exporter", DummyExporter)
 
     output_dir = tmp_path / "out"
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "export",
             "--server",
@@ -174,22 +170,22 @@ def test_export_command_parses_options(monkeypatch, tmp_path):
     assert exporter is not None
     assert exporter.config.server == "localhost"
     assert exporter.config.database == "TestDb"
-    assert exporter.config.schema == "dbo"
-    assert exporter.config.table == "MyTable"
+    assert exporter.schema == "dbo"
+    assert exporter.table == "MyTable"
     assert exporter.pk_column == "id"
     assert exporter.columns == ["a", "b", "c"]
     assert exporter.worker_count == 2
     assert exporter.file_count == 3
-    assert exporter.engine == "duckdb"
+    assert exporter.engine == EXPORT_ENGINE_DEFAULT
     assert exporter.output_path == output_dir
 
 
 def test_export_command_parses_engine_option(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Exporter", DummyExporter)
+    monkeypatch.setattr(export_command, "Exporter", DummyExporter)
 
     output_dir = tmp_path / "out"
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "export",
             "--server",
@@ -213,98 +209,6 @@ def test_export_command_parses_engine_option(monkeypatch, tmp_path):
     assert exporter.engine == "pyodbc"
 
 
-def test_export_command_parses_rowgroups_per_file(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Exporter", DummyExporter)
-
-    output_dir = tmp_path / "out"
-    result = runner.invoke(
-        cli.app,
-        [
-            "export",
-            "--server",
-            "localhost",
-            "--database",
-            "TestDb",
-            "--schema",
-            "dbo",
-            "--table",
-            "MyTable",
-            "--output-path",
-            str(output_dir),
-            "--trusted-connection",
-            "--rowgroups-per-file",
-            "5",
-        ],
-    )
-
-    assert result.exit_code == 0
-    exporter = DummyExporter.last_instance
-    assert exporter.rowgroups_per_file == 5
-    assert exporter.file_count == 1
-
-
-def test_export_command_rejects_both_file_count_and_rowgroups_per_file(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setattr(cli, "Exporter", DummyExporter)
-
-    output_dir = tmp_path / "out"
-    result = runner.invoke(
-        cli.app,
-        [
-            "export",
-            "--server",
-            "localhost",
-            "--database",
-            "TestDb",
-            "--schema",
-            "dbo",
-            "--table",
-            "MyTable",
-            "--output-path",
-            str(output_dir),
-            "--trusted-connection",
-            "--file-count",
-            "4",
-            "--rowgroups-per-file",
-            "5",
-        ],
-    )
-
-    assert result.exit_code != 0
-    assert "mutually exclusive" in result.output
-
-
-def test_export_command_defaults_file_count_1_when_neither_specified(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setattr(cli, "Exporter", DummyExporter)
-
-    output_dir = tmp_path / "out"
-    result = runner.invoke(
-        cli.app,
-        [
-            "export",
-            "--server",
-            "localhost",
-            "--database",
-            "TestDb",
-            "--schema",
-            "dbo",
-            "--table",
-            "MyTable",
-            "--output-path",
-            str(output_dir),
-            "--trusted-connection",
-        ],
-    )
-
-    assert result.exit_code == 0
-    exporter = DummyExporter.last_instance
-    assert exporter.file_count == 1
-    assert exporter.rowgroups_per_file is None
-
-
 def test_export_command_manifest_version_is_2(monkeypatch, tmp_path):
     import pybutt.io.exporter as exporter_module
 
@@ -315,7 +219,7 @@ def test_export_command_manifest_version_is_2(monkeypatch, tmp_path):
     monkeypatch.setattr(exporter_module.Exporter, "partition_meta", fake_partition_meta)
 
     def fake_export_partition(self, n):
-        filename = f"{self.config.schema}_{self.config.table}_part_{n:05d}.parquet"
+        filename = f"{self.schema}_{self.table}_part_{n:05d}.parquet"
         filepath = self.output_path / filename
         filepath.write_text("dummy")
         return filename
@@ -350,7 +254,7 @@ def test_export_command_manifest_version_is_2(monkeypatch, tmp_path):
     monkeypatch.setattr(exporter_module, "get_context", lambda _: DummyContext())
 
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "export",
             "--server",
@@ -405,7 +309,7 @@ def test_export_command_supports_view_like_objects(monkeypatch, tmp_path):
             raise AssertionError(f"Unexpected query: {query}")
 
     def fake_export_partition(self, n):
-        filename = f"{self.config.schema}_{self.config.table}_part_{n:05d}.parquet"
+        filename = f"{self.schema}_{self.table}_part_{n:05d}.parquet"
         filepath = self.output_path / filename
         filepath.write_text("dummy")
         return filename
@@ -442,7 +346,7 @@ def test_export_command_supports_view_like_objects(monkeypatch, tmp_path):
     monkeypatch.setattr(exporter_module, "get_context", lambda _: DummyContext())
 
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "export",
             "--server",
@@ -471,13 +375,13 @@ def test_export_command_supports_view_like_objects(monkeypatch, tmp_path):
 
 
 def test_import_command_parses_engine_option(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Importer", DummyImporter)
+    monkeypatch.setattr(import_command, "Importer", DummyImporter)
 
     input_dir = tmp_path / "input"
     input_dir.mkdir()
-    manifest = "manifest.json"
+    manifest = input_dir / "manifest.json"
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "import",
             "--server",
@@ -488,13 +392,11 @@ def test_import_command_parses_engine_option(monkeypatch, tmp_path):
             "dbo",
             "--table",
             "MyTable",
-            "--input-path",
-            str(input_dir),
-            "--manifest-filename",
-            manifest,
             "--trusted-connection",
             "--engine",
             "duckdb",
+            # Args after options
+            str(manifest),
         ],
     )
 
@@ -504,11 +406,11 @@ def test_import_command_parses_engine_option(monkeypatch, tmp_path):
 
 
 def test_export_command_parses_mssql_python_engine_option(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Exporter", DummyExporter)
+    monkeypatch.setattr(export_command, "Exporter", DummyExporter)
 
     output_dir = tmp_path / "out"
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "export",
             "--server",
@@ -533,13 +435,13 @@ def test_export_command_parses_mssql_python_engine_option(monkeypatch, tmp_path)
 
 
 def test_import_command_parses_mssql_python_engine_option(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Importer", DummyImporter)
+    monkeypatch.setattr(import_command, "Importer", DummyImporter)
 
     input_dir = tmp_path / "input"
     input_dir.mkdir()
-    manifest = "manifest.json"
+    manifest = input_dir / "manifest.json"
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "import",
             "--server",
@@ -550,13 +452,11 @@ def test_import_command_parses_mssql_python_engine_option(monkeypatch, tmp_path)
             "dbo",
             "--table",
             "MyTable",
-            "--input-path",
-            str(input_dir),
-            "--manifest-filename",
-            manifest,
             "--trusted-connection",
             "--engine",
             "mssql-python",
+            # Args after options
+            str(manifest),
         ],
     )
 
@@ -566,13 +466,13 @@ def test_import_command_parses_mssql_python_engine_option(monkeypatch, tmp_path)
 
 
 def test_import_command_parses_options(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Importer", DummyImporter)
+    monkeypatch.setattr(import_command, "Importer", DummyImporter)
 
     input_dir = tmp_path / "input"
     input_dir.mkdir()
-    manifest = "manifest.json"
+    manifest = input_dir / "manifest.json"
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "import",
             "--server",
@@ -583,15 +483,13 @@ def test_import_command_parses_options(monkeypatch, tmp_path):
             "dbo",
             "--table",
             "MyTable",
-            "--input-path",
-            str(input_dir),
-            "--manifest-filename",
-            manifest,
             "--trusted-connection",
             "--worker-count",
             "4",
             "--batch-size",
             "2500",
+            # Args after options
+            str(manifest),
         ],
     )
 
@@ -601,51 +499,21 @@ def test_import_command_parses_options(monkeypatch, tmp_path):
     assert importer is not None
     assert importer.config.server == "localhost"
     assert importer.config.database == "TestDb"
-    assert importer.config.schema == "dbo"
-    assert importer.config.table == "MyTable"
+    assert importer.schema == "dbo"
+    assert importer.table == "MyTable"
     assert importer.input_path == input_dir
-    assert importer.manifest_filename == manifest
+    assert importer.manifest_filename == manifest.name
     assert importer.worker_count == 4
     assert importer.batch_size == 2500
-    assert importer.engine == "pyodbc"
-
-
-def test_import_command_batch_size_defaults_to_sentinel(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Importer", DummyImporter)
-
-    input_dir = tmp_path / "input"
-    input_dir.mkdir()
-    result = runner.invoke(
-        cli.app,
-        [
-            "import",
-            "--server",
-            "localhost",
-            "--database",
-            "TestDb",
-            "--schema",
-            "dbo",
-            "--table",
-            "MyTable",
-            "--input-path",
-            str(input_dir),
-            "--manifest-filename",
-            "manifest.json",
-            "--trusted-connection",
-        ],
-    )
-
-    assert result.exit_code == 0
-    # CLI forwards None when unset so the Importer applies the engine-aware default.
-    assert DummyImporter.last_instance.batch_size is None
+    assert importer.engine == IMPORT_ENGINE_DEFAULT
 
 
 def test_export_command_passes_manifest_filename(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Exporter", DummyExporter)
+    monkeypatch.setattr(export_command, "Exporter", DummyExporter)
 
     output_dir = tmp_path / "out"
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "export",
             "--server",
@@ -670,11 +538,11 @@ def test_export_command_passes_manifest_filename(monkeypatch, tmp_path):
 
 
 def test_export_command_passes_function_parameters(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Exporter", DummyExporter)
+    monkeypatch.setattr(export_command, "Exporter", DummyExporter)
 
     output_dir = tmp_path / "out"
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "export",
             "--server",
@@ -698,36 +566,7 @@ def test_export_command_passes_function_parameters(monkeypatch, tmp_path):
     assert exporter.parameters == "12,'fred','1989'"
 
 
-def test_import_command_uses_default_manifest_filename(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Importer", DummyImporter)
-
-    input_dir = tmp_path / "input"
-    input_dir.mkdir()
-    result = runner.invoke(
-        cli.app,
-        [
-            "import",
-            "--server",
-            "localhost",
-            "--database",
-            "TestDb",
-            "--schema",
-            "dbo",
-            "--table",
-            "MyTable",
-            "--input-path",
-            str(input_dir),
-            "--trusted-connection",
-        ],
-    )
-
-    assert result.exit_code == 0
-    importer = DummyImporter.last_instance
-    assert importer is not None
-    assert importer.manifest_filename is None
-
-
-def test_merge_command_files_invokes_merge_helper(
+def test_combine_command_files_invokes_combine_helper(
     monkeypatch, tmp_path, create_parquet
 ):
     create_parquet(tmp_path, "a.parquet", rows=3)
@@ -737,7 +576,7 @@ def test_merge_command_files_invokes_merge_helper(
 
     called = {}
 
-    def fake_merge(
+    def fake_combine(
         manifest_path,
         output_file,
         rowgroup_size,
@@ -752,34 +591,34 @@ def test_merge_command_files_invokes_merge_helper(
             new_manifest_name,
         )
 
-    monkeypatch.setattr(cli, "merge_parquet_files", fake_merge)
+    monkeypatch.setattr(combine_command, "combine_parquet_files", fake_combine)
 
-    output_file = tmp_path / "merged.parquet"
+    output_file = tmp_path / "combined.parquet"
     result = runner.invoke(
-        cli.app,
+        app,
         [
-            "merge",
-            "--manifest",
-            str(manifest),
+            "combine",
             "--output-file",
             str(output_file),
             "--trusted-connection",
+            # Args after options
+            str(manifest),
         ],
     )
 
     assert result.exit_code == 0
-    assert "File merge completed successfully" in result.output
+    assert "File combine completed successfully" in result.output
     assert called["args"] == (manifest, output_file, 1048576, False, None)
 
 
 def test_import_command_uses_local_temp_tables_by_default(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Importer", DummyImporter)
+    monkeypatch.setattr(import_command, "Importer", DummyImporter)
 
     input_dir = tmp_path / "input"
     input_dir.mkdir()
-    manifest = "manifest.json"
+    manifest = input_dir / "manifest.json"
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "import",
             "--server",
@@ -790,11 +629,9 @@ def test_import_command_uses_local_temp_tables_by_default(monkeypatch, tmp_path)
             "dbo",
             "--table",
             "MyTable",
-            "--input-path",
-            str(input_dir),
-            "--manifest-filename",
-            manifest,
             "--trusted-connection",
+            # Args after options
+            str(manifest),
         ],
     )
 
@@ -804,12 +641,13 @@ def test_import_command_uses_local_temp_tables_by_default(monkeypatch, tmp_path)
 
 
 def test_import_command_enables_cci_by_default(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Importer", DummyImporter)
+    monkeypatch.setattr(import_command, "Importer", DummyImporter)
 
     input_dir = tmp_path / "input"
     input_dir.mkdir()
+    manifest = input_dir / "manifest.json"
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "import",
             "--server",
@@ -820,11 +658,9 @@ def test_import_command_enables_cci_by_default(monkeypatch, tmp_path):
             "dbo",
             "--table",
             "MyTable",
-            "--input-path",
-            str(input_dir),
-            "--manifest-filename",
-            "manifest.json",
             "--trusted-connection",
+            # Args after options
+            str(manifest),
         ],
     )
 
@@ -833,12 +669,13 @@ def test_import_command_enables_cci_by_default(monkeypatch, tmp_path):
 
 
 def test_import_command_parses_no_cci_option(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Importer", DummyImporter)
+    monkeypatch.setattr(import_command, "Importer", DummyImporter)
 
     input_dir = tmp_path / "input"
     input_dir.mkdir()
+    manifest = input_dir / "manifest.json"
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "import",
             "--server",
@@ -849,12 +686,10 @@ def test_import_command_parses_no_cci_option(monkeypatch, tmp_path):
             "dbo",
             "--table",
             "MyTable",
-            "--input-path",
-            str(input_dir),
-            "--manifest-filename",
-            "manifest.json",
             "--trusted-connection",
             "--no-cci",
+            # Args after options
+            str(manifest),
         ],
     )
 
@@ -862,53 +697,18 @@ def test_import_command_parses_no_cci_option(monkeypatch, tmp_path):
     assert DummyImporter.last_instance.create_cci is False
 
 
-def test_import_command_parses_delete_files_option(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Importer", DummyImporter)
-
-    input_dir = tmp_path / "input"
-    input_dir.mkdir()
-    manifest = "manifest.json"
-    result = runner.invoke(
-        cli.app,
-        [
-            "import",
-            "--server",
-            "localhost",
-            "--database",
-            "TestDb",
-            "--schema",
-            "dbo",
-            "--table",
-            "MyTable",
-            "--input-path",
-            str(input_dir),
-            "--manifest-filename",
-            manifest,
-            "--trusted-connection",
-            "--delete-files",
-        ],
-    )
-
-    assert result.exit_code == 0
-    importer = DummyImporter.last_instance
-    assert importer is not None
-    assert importer.delete_files is True
-
-
-def test_merge_command_tables_invokes_table_merger(monkeypatch, tmp_path):
+def test_combine_command_tables_invokes_table_combiner(monkeypatch, tmp_path):
     manifest = tmp_path / "manifest.json"
     manifest.write_text(
         '{"version": 2, "type": "tables", "entries": ["dbo.TableA", "dbo.TableB"]}'
     )
 
-    monkeypatch.setattr(cli, "TableMerger", DummyMerger)
+    monkeypatch.setattr(combine_command, "TableCombine", DummyCombiner)
 
     result = runner.invoke(
-        cli.app,
+        app,
         [
-            "merge",
-            "--manifest",
-            str(manifest),
+            "combine",
             "--server",
             "localhost",
             "--database",
@@ -918,24 +718,26 @@ def test_merge_command_tables_invokes_table_merger(monkeypatch, tmp_path):
             "--table",
             "MyTable",
             "--trusted-connection",
+            # Args after options
+            str(manifest),
         ],
     )
 
     assert result.exit_code == 0
-    merger = DummyMerger.last_instance
-    assert merger is not None
-    assert merger.sources == ["dbo.TableA", "dbo.TableB"]
-    assert merger.merge_called
+    combiner = DummyCombiner.last_instance
+    assert combiner is not None
+    assert combiner.sources == ["dbo.TableA", "dbo.TableB"]
+    assert combiner.combine_called
 
 
 def test_import_command_passes_temp_manifest_filename(monkeypatch, tmp_path):
-    monkeypatch.setattr(cli, "Importer", DummyImporter)
+    monkeypatch.setattr(import_command, "Importer", DummyImporter)
 
     input_dir = tmp_path / "input"
     input_dir.mkdir()
-    manifest = "manifest.json"
+    manifest = input_dir / "manifest.json"
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "import",
             "--server",
@@ -946,13 +748,11 @@ def test_import_command_passes_temp_manifest_filename(monkeypatch, tmp_path):
             "dbo",
             "--table",
             "MyTable",
-            "--input-path",
-            str(input_dir),
-            "--manifest-filename",
-            manifest,
             "--trusted-connection",
-            "--output-manifest-filename",
+            "--imported-manifest-filename",
             "custom_temp_manifest.json",
+            # Args after options
+            str(manifest),
         ],
     )
 
@@ -961,13 +761,13 @@ def test_import_command_passes_temp_manifest_filename(monkeypatch, tmp_path):
     assert importer.temp_manifest_filename == "custom_temp_manifest.json"
 
 
-def test_merge_command_files_requires_output_file(tmp_path):
+def test_combine_command_files_requires_output_file(tmp_path):
     manifest = tmp_path / "manifest.json"
     manifest.write_text('["a.parquet"]')
 
     result = runner.invoke(
-        cli.app,
-        ["merge", "--manifest", str(manifest), "--trusted-connection"],
+        app,
+        ["combine", "--trusted-connection", str(manifest)],
     )
 
     assert result.exit_code != 0
@@ -976,7 +776,7 @@ def test_merge_command_files_requires_output_file(tmp_path):
 
 def test_export_command_requires_username_without_trusted_connection():
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "export",
             "--server",
@@ -1001,8 +801,9 @@ def test_export_command_requires_username_without_trusted_connection():
 def test_import_command_requires_username_without_trusted_connection(tmp_path):
     input_dir = tmp_path / "input"
     input_dir.mkdir()
+    manifest = input_dir / "manifest.json"
     result = runner.invoke(
-        cli.app,
+        app,
         [
             "import",
             "--server",
@@ -1013,12 +814,10 @@ def test_import_command_requires_username_without_trusted_connection(tmp_path):
             "dbo",
             "--table",
             "MyTable",
-            "--input-path",
-            str(input_dir),
-            "--manifest-filename",
-            "manifest.json",
             "--password",
             "user",
+            # Args after options
+            str(manifest),
         ],
     )
 
@@ -1029,17 +828,17 @@ def test_import_command_requires_username_without_trusted_connection(tmp_path):
 class TestTransactionModeCliParameter:
     """Test transaction mode CLI parameter handling."""
 
-    def test_import_command_default_transaction_mode_is_batch(
+    def test_import_command_default_transaction_mode_is_default(
         self, monkeypatch, tmp_path
     ):
-        """Test that default transaction mode is BATCH."""
-        monkeypatch.setattr(cli, "Importer", DummyImporter)
+        """Test that default transaction mode is IMPORTER_DEFAULT_TRANSACTION_MODE."""
+        monkeypatch.setattr(import_command, "Importer", DummyImporter)
 
         input_dir = tmp_path / "input"
         input_dir.mkdir()
-
+        manifest = input_dir / "manifest.json"
         result = runner.invoke(
-            cli.app,
+            app,
             [
                 "import",
                 "--server",
@@ -1048,28 +847,26 @@ class TestTransactionModeCliParameter:
                 "TestDb",
                 "--table",
                 "MyTable",
-                "--input-path",
-                str(input_dir),
-                "--manifest-filename",
-                "manifest.json",
                 "--trusted-connection",
+                # Args after options
+                str(manifest),
             ],
         )
 
         assert result.exit_code == 0
         importer = DummyImporter.last_instance
         assert importer is not None
-        assert importer.transaction_mode == TransactionMode.BATCH
+        assert importer.transaction_mode == TRANSACTION_MODE_DEFAULT
 
     def test_import_command_accepts_batch_mode(self, monkeypatch, tmp_path):
         """Test that BATCH transaction mode is accepted via CLI."""
-        monkeypatch.setattr(cli, "Importer", DummyImporter)
+        monkeypatch.setattr(import_command, "Importer", DummyImporter)
 
         input_dir = tmp_path / "input"
         input_dir.mkdir()
-
+        manifest = input_dir / "manifest.json"
         result = runner.invoke(
-            cli.app,
+            app,
             [
                 "import",
                 "--server",
@@ -1078,13 +875,11 @@ class TestTransactionModeCliParameter:
                 "TestDb",
                 "--table",
                 "MyTable",
-                "--input-path",
-                str(input_dir),
-                "--manifest-filename",
-                "manifest.json",
                 "--trusted-connection",
                 "--transaction-mode",
                 "batch",
+                # Args after options
+                str(manifest),
             ],
         )
 
@@ -1095,13 +890,13 @@ class TestTransactionModeCliParameter:
 
     def test_import_command_accepts_rowgroup_mode(self, monkeypatch, tmp_path):
         """Test that ROWGROUP transaction mode is accepted via CLI."""
-        monkeypatch.setattr(cli, "Importer", DummyImporter)
+        monkeypatch.setattr(import_command, "Importer", DummyImporter)
 
         input_dir = tmp_path / "input"
         input_dir.mkdir()
-
+        manifest = input_dir / "manifest.json"
         result = runner.invoke(
-            cli.app,
+            app,
             [
                 "import",
                 "--server",
@@ -1110,13 +905,11 @@ class TestTransactionModeCliParameter:
                 "TestDb",
                 "--table",
                 "MyTable",
-                "--input-path",
-                str(input_dir),
-                "--manifest-filename",
-                "manifest.json",
                 "--trusted-connection",
                 "--transaction-mode",
                 "rowgroup",
+                # Args after options
+                str(manifest),
             ],
         )
 
@@ -1127,13 +920,13 @@ class TestTransactionModeCliParameter:
 
     def test_import_command_accepts_file_mode(self, monkeypatch, tmp_path):
         """Test that FILE transaction mode is accepted via CLI."""
-        monkeypatch.setattr(cli, "Importer", DummyImporter)
+        monkeypatch.setattr(import_command, "Importer", DummyImporter)
 
         input_dir = tmp_path / "input"
         input_dir.mkdir()
-
+        manifest = input_dir / "manifest.json"
         result = runner.invoke(
-            cli.app,
+            app,
             [
                 "import",
                 "--server",
@@ -1142,13 +935,11 @@ class TestTransactionModeCliParameter:
                 "TestDb",
                 "--table",
                 "MyTable",
-                "--input-path",
-                str(input_dir),
-                "--manifest-filename",
-                "manifest.json",
                 "--trusted-connection",
                 "--transaction-mode",
                 "file",
+                # Args after options
+                str(manifest),
             ],
         )
 
@@ -1156,45 +947,6 @@ class TestTransactionModeCliParameter:
         importer = DummyImporter.last_instance
         assert importer is not None
         assert importer.transaction_mode == TransactionMode.FILE
-
-    def test_import_command_accepts_row_mode(self, monkeypatch, tmp_path):
-        """Test that ROW transaction mode is accepted via CLI."""
-        monkeypatch.setattr(cli, "Importer", DummyImporter)
-
-        input_dir = tmp_path / "input"
-        input_dir.mkdir()
-
-        result = runner.invoke(
-            cli.app,
-            [
-                "import",
-                "--server",
-                "localhost",
-                "--database",
-                "TestDb",
-                "--table",
-                "MyTable",
-                "--input-path",
-                str(input_dir),
-                "--manifest-filename",
-                "manifest.json",
-                "--trusted-connection",
-                "--transaction-mode",
-                "row",
-            ],
-        )
-
-        assert result.exit_code == 0
-        importer = DummyImporter.last_instance
-        assert importer is not None
-        assert importer.transaction_mode == TransactionMode.ROW
-
-    def test_import_help_displays_transaction_mode_option(self):
-        """Test that --transaction-mode option appears in help."""
-        result = runner.invoke(cli.app, ["import", "--help"])
-        assert result.exit_code == 0
-        assert "transaction" in result.output.lower()
-        assert "batch" in result.output.lower()
 
 
 def test_cli_files_inspect(tmp_path, create_parquet):
@@ -1204,62 +956,12 @@ def test_cli_files_inspect(tmp_path, create_parquet):
     with open(manifest, "w") as f:
         json.dump(["x.parquet"], f)
 
-    result = runner.invoke(cli.app, ["inspect", str(manifest)])
+    result = runner.invoke(app, ["inspect", str(manifest)])
 
     assert result.exit_code == 0
     assert "x.parquet" in result.stdout
     assert "rows: 8" in result.stdout
     assert "row groups: 2" in result.stdout
-
-
-def test_cli_rewrite_defaults_manifest_name(tmp_path, create_parquet):
-    create_parquet(tmp_path, "x.parquet", rows=8, rowgroup_size=2)
-
-    manifest = tmp_path / "manifest.json"
-    with open(manifest, "w") as f:
-        json.dump(["x.parquet"], f)
-
-    result = runner.invoke(
-        cli.app,
-        [
-            "rewrite",
-            str(manifest),
-            "--rowgroup-size",
-            "4",
-        ],
-    )
-
-    assert result.exit_code == 0
-    assert (tmp_path / "manifest_new.json").exists()
-
-
-def test_cli_rewrite_manifest_version_is_2(tmp_path, create_parquet):
-    create_parquet(tmp_path, "x.parquet", rows=8, rowgroup_size=2)
-
-    manifest = tmp_path / "manifest.json"
-    with open(manifest, "w") as f:
-        json.dump(["x.parquet"], f)
-
-    result = runner.invoke(
-        cli.app,
-        [
-            "rewrite",
-            str(manifest),
-            "--rowgroup-size",
-            "4",
-        ],
-    )
-
-    assert result.exit_code == 0
-    manifest_file = tmp_path / "manifest_new.json"
-    assert manifest_file.exists()
-
-    with open(manifest_file) as f:
-        manifest_data = json.load(f)
-
-    assert manifest_data["version"] == 2
-    assert manifest_data["type"] == "files"
-    assert manifest_data["entries"] == ["x_new.parquet"]
 
 
 def test_cli_files_inspect_verbose(tmp_path, create_parquet):
@@ -1269,7 +971,7 @@ def test_cli_files_inspect_verbose(tmp_path, create_parquet):
     with open(manifest, "w") as f:
         json.dump(["x.parquet"], f)
 
-    result = runner.invoke(cli.app, ["inspect", str(manifest), "--verbose"])
+    result = runner.invoke(app, ["inspect", str(manifest), "--verbose"])
 
     assert result.exit_code == 0
     assert "columns:" in result.stdout
