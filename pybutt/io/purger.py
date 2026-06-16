@@ -36,9 +36,7 @@ class TablePurger(SqlServerIOBase):
                 schema, table = self._parse_schema_table(fq_name)
                 qualified = f"{quote_identifier(schema)}.{quote_identifier(table)}"
                 logger.info(f"Dropping table {qualified}")
-                cur.execute(
-                    f"DROP TABLE IF EXISTS {qualified}"  # noqa: S608
-                )
+                cur.execute(f"DROP TABLE IF EXISTS {qualified}")  # noqa: S608
                 dropped.append(fq_name)
                 logger.info(f"Dropped table {qualified}")
         finally:

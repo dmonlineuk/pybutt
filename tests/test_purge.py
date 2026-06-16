@@ -69,9 +69,7 @@ def test_purge_files_v2_manifest(tmp_path, create_parquet):
     create_parquet(tmp_path, "part_00000.parquet", rows=5)
     manifest = tmp_path / "manifest.json"
     manifest.write_text(
-        json.dumps(
-            {"version": 2, "type": "files", "entries": ["part_00000.parquet"]}
-        )
+        json.dumps({"version": 2, "type": "files", "entries": ["part_00000.parquet"]})
     )
 
     result = runner.invoke(app, ["purge", str(manifest)])
@@ -139,9 +137,7 @@ def test_purge_tables_requires_server_and_database(tmp_path):
     """Table purge fails if --server and --database are not provided."""
     manifest = tmp_path / "manifest.json"
     manifest.write_text(
-        json.dumps(
-            {"version": 2, "type": "tables", "entries": ["dbo.TableA"]}
-        )
+        json.dumps({"version": 2, "type": "tables", "entries": ["dbo.TableA"]})
     )
 
     result = runner.invoke(
@@ -157,9 +153,7 @@ def test_purge_tables_requires_username_without_trusted_connection(tmp_path):
     """Table purge requires --username when not using --trusted-connection."""
     manifest = tmp_path / "manifest.json"
     manifest.write_text(
-        json.dumps(
-            {"version": 2, "type": "tables", "entries": ["dbo.TableA"]}
-        )
+        json.dumps({"version": 2, "type": "tables", "entries": ["dbo.TableA"]})
     )
 
     result = runner.invoke(
@@ -207,9 +201,7 @@ def test_table_purger_drops_tables():
     assert dropped == ["dbo.TableA", "schema1.TableB"]
     assert mock_cursor.execute.call_count == 2
     mock_cursor.execute.assert_any_call("DROP TABLE IF EXISTS [dbo].[TableA]")
-    mock_cursor.execute.assert_any_call(
-        "DROP TABLE IF EXISTS [schema1].[TableB]"
-    )
+    mock_cursor.execute.assert_any_call("DROP TABLE IF EXISTS [schema1].[TableB]")
     mock_conn.close.assert_called_once()
 
 

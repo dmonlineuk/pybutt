@@ -213,8 +213,10 @@ def combine(
         )
 
         try:
-            combiner = TableCombine(config=config, sources=manifest["entries"])
-            combiner.combine(target_schema=schema, target_table=table)
+            combiner = TableCombine(
+                config=config, sources=manifest["entries"], schema=schema, table=table
+            )
+            combiner.combine()
         except PyButtError as exc:
             typer.secho(f"Combine failed: {exc}", fg=typer.colors.RED, err=True)
             raise SystemExit(1) from exc

@@ -22,13 +22,15 @@ runner = CliRunner()
 class DummyCombiner:
     last_instance = None
 
-    def __init__(self, config, sources):
+    def __init__(self, config, sources, schema, table):
         self.config = config
         self.sources = sources
+        self.schema = schema
+        self.table = table
         self.combine_called = False
         DummyCombiner.last_instance = self
 
-    def combine(self, target_schema, target_table):
+    def combine(self):
         self.combine_called = True
 
 
