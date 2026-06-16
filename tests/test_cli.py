@@ -38,7 +38,9 @@ class DummyExporter:
     def __init__(
         self,
         config,
-        output_path,
+        schema="dbo",
+        table="MyTable",
+        output_path=".",
         pk_column=None,
         columns=None,
         worker_count=1,
@@ -55,6 +57,8 @@ class DummyExporter:
         mem_cooldown=30.0,
     ):
         self.config = config
+        self.schema = schema
+        self.table = table
         self.output_path = Path(output_path)
         self.pk_column = pk_column
         self.columns = columns
@@ -82,8 +86,10 @@ class DummyImporter:
     def __init__(
         self,
         config,
-        input_path,
-        manifest_filename,
+        schema="dbo",
+        table="MyTable",
+        input_path=".",
+        manifest_filename=None,
         worker_count=1,
         batch_size=None,
         transaction_mode=None,
@@ -98,6 +104,8 @@ class DummyImporter:
         mem_cooldown=30.0,
     ):
         self.config = config
+        self.schema = schema
+        self.table = table
         self.input_path = Path(input_path)
         self.manifest_filename = manifest_filename
         self.temp_manifest_filename = temp_manifest_filename
@@ -160,8 +168,8 @@ def test_export_command_parses_options(monkeypatch, tmp_path):
     assert exporter is not None
     assert exporter.config.server == "localhost"
     assert exporter.config.database == "TestDb"
-    assert exporter.config.schema == "dbo"
-    assert exporter.config.table == "MyTable"
+    assert exporter.schema == "dbo"
+    assert exporter.table == "MyTable"
     assert exporter.pk_column == "id"
     assert exporter.columns == ["a", "b", "c"]
     assert exporter.worker_count == 2
@@ -209,7 +217,7 @@ def test_export_command_manifest_version_is_2(monkeypatch, tmp_path):
     monkeypatch.setattr(exporter_module.Exporter, "partition_meta", fake_partition_meta)
 
     def fake_export_partition(self, n):
-        filename = f"{self.config.schema}_{self.config.table}_part_{n:05d}.parquet"
+        filename = f"{self.schema}_{self.table}_part_{n:05d}.parquet"
         filepath = self.output_path / filename
         filepath.write_text("dummy")
         return filename
@@ -299,7 +307,7 @@ def test_export_command_supports_view_like_objects(monkeypatch, tmp_path):
             raise AssertionError(f"Unexpected query: {query}")
 
     def fake_export_partition(self, n):
-        filename = f"{self.config.schema}_{self.config.table}_part_{n:05d}.parquet"
+        filename = f"{self.schema}_{self.table}_part_{n:05d}.parquet"
         filepath = self.output_path / filename
         filepath.write_text("dummy")
         return filename
@@ -489,8 +497,8 @@ def test_import_command_parses_options(monkeypatch, tmp_path):
     assert importer is not None
     assert importer.config.server == "localhost"
     assert importer.config.database == "TestDb"
-    assert importer.config.schema == "dbo"
-    assert importer.config.table == "MyTable"
+    assert importer.schema == "dbo"
+    assert importer.table == "MyTable"
     assert importer.input_path == input_dir
     assert importer.manifest_filename == manifest.name
     assert importer.worker_count == 4

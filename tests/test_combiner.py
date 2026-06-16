@@ -23,8 +23,6 @@ def mock_config():
     return SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="TargetTable",
         trusted_connection=True,
         retries=3,
     )

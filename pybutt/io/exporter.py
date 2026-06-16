@@ -51,6 +51,8 @@ class Exporter(SqlServerIOBase):
     def __init__(
         self,
         config: SqlConfig,
+        schema: str,
+        table: str,
         output_path,
         pk_column=None,
         columns=None,
@@ -68,6 +70,8 @@ class Exporter(SqlServerIOBase):
         mem_cooldown: float = MEM_COOLDOWN_DEFAULT,
     ):
         super().__init__(config)
+        self.schema = validate_identifier(schema)
+        self.table = validate_identifier(table)
 
         self.mem_heartbeat = mem_heartbeat
         self.mem_gate = MemoryGate(mem_threshold, mem_sleep, mem_max_wait, mem_cooldown)

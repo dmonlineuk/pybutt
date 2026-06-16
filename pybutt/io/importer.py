@@ -25,6 +25,7 @@ from pybutt.core.config import (
     coerce_transaction_mode,
     quote_identifier,
     validate_engine,
+    validate_identifier,
 )
 from pybutt.core.logobs import (
     MemoryGate,
@@ -68,6 +69,8 @@ class Importer(SqlServerIOBase):
     def __init__(
         self,
         config: SqlConfig,
+        schema: str,
+        table: str,
         input_path,
         manifest_filename: str | None,
         worker_count=1,
@@ -83,6 +86,8 @@ class Importer(SqlServerIOBase):
         mem_cooldown: float = MEM_COOLDOWN_DEFAULT,
     ):
         super().__init__(config)
+        self.schema = validate_identifier(schema)
+        self.table = validate_identifier(table)
 
         self.input_path = Path(input_path)
         self.manifest_filename = (

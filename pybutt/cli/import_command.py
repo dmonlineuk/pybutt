@@ -250,8 +250,6 @@ def import_data(
     config = build_sql_config(
         server=server,
         database=database,
-        schema=schema,
-        table=table,
         username=username,
         password=password,
         driver=driver,
@@ -265,6 +263,8 @@ def import_data(
     try:
         importer = Importer(
             config=config,
+            schema=schema,
+            table=table,
             input_path=manifest_path.parent,
             manifest_filename=manifest_path.name,
             worker_count=worker_count,

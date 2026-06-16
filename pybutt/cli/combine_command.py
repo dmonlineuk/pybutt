@@ -202,8 +202,6 @@ def combine(
         config = build_sql_config(
             server=server,
             database=database,
-            schema=schema,
-            table=table,
             username=username,
             password=password,
             driver=driver,

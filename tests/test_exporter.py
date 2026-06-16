@@ -36,8 +36,6 @@ def mock_config():
     return SqlConfig(
         server="localhost",
         database="TestDb",
-        schema="dbo",
-        table="MyTable",
         trusted_connection=True,
         retries=1,
     )
@@ -47,6 +45,8 @@ def _make_exporter(mock_config, tmp_path, **kwargs):
     """Helper to create an Exporter with partition_meta mocked out."""
     defaults = dict(
         config=mock_config,
+        schema="dbo",
+        table="MyTable",
         output_path=tmp_path,
         worker_count=1,
         file_count=2,

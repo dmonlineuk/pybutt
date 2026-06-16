@@ -206,15 +206,9 @@ def _purge_tables(
         logger.info(f"Deleted manifest: {manifest_path}")
         return
 
-    # Use first entry's schema as the config schema, and a placeholder table.
-    # The actual tables are dropped by iterating entries.
-    first_schema = entries[0].split(".")[0] if "." in entries[0] else "dbo"
-
     config = build_sql_config(
         server=server,
         database=database,
-        schema=first_schema,
-        table="_purge",
         username=username,
         password=password,
         driver=driver,

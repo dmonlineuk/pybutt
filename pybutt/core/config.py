@@ -130,10 +130,8 @@ def sanitise_dsn_value(value: str) -> str:
 class SqlConfig:
     server: str
     database: str
-    table: str
     username: str | None = None
     password: str | None = None
-    schema: str = SCHEMA_DEFAULT
     driver: str = DRIVER_DEFAULT
     trusted_connection: bool = TRUSTED_CONNECTION_DEFAULT
     trust_cert: bool = TRUST_CERT_DEFAULT
