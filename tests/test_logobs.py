@@ -401,9 +401,9 @@ def test_memory_gate_respects_max_wait():
 
 def test_memory_gate_cooldown_skips_recheck():
     gate = MemoryGate(
-        threshold_pct=1.0, sleep_seconds=0.05, max_wait=0.1, cooldown_seconds=60.0
+        threshold_pct=0.1, sleep_seconds=0.05, max_wait=0.1, cooldown_seconds=60.0
     )
-    # First check triggers (system is always >1%)
+    # First check triggers (system memory is always >0.1%)
     waited1 = gate.check("first")
     assert waited1 > 0
     # Second check should be skipped due to cooldown

@@ -1,98 +1,80 @@
 # Defaults and their rationale
 
-This is a living document. It records the **current** defaults, and the rationale
-behind any **engine-specific** defaults. Update it in the same change whenever a
-default is added or changed.
+This is a living document. It records the **current** defaults shipped with
+PyButt v2. Update it in the same change whenever a default is added or changed.
 
 ## Current defaults (as shipped)
 
 ### Export
 | Option | Default | Notes |
 |---|---|---|
-| `--engine` | `duckdb` | Fast Arrow-native streaming. |
+| `--engine` | `pyodbc` | Broad compatibility. |
 | `--rowgroup-size` | `1048576` | Matches SQL Server's max columnstore rowgroup. Also the dominant export-memory driver. |
-| `--fetch-size` | `min(max(1024, rowgroup_size), 8192)` | Derived; only used by `pyodbc`/`mssql-python` engines. |
+| `--fetch-size` | `1000` | Cursor fetch size for pyodbc/mssql-python engines. |
 | `--worker-count` | `1` | |
 | `--file-count` | `1` | |
 | `--retries` | `3` | |
-| `--packet-size` | `16383` | Max for encrypted connections (512–32767). |
+| `--packet-size` | `4096` | TDS packet size in bytes (512–32767). |
 
 ### Import
 | Option | Default | Notes |
 |---|---|---|
-| `--engine` | `pyodbc` | Broad compatibility; parameterised `executemany`. |
-| `--batch-size` | `1000`, or `1048576` for `mssql-python` | Engine-aware (see below). Rows per insert / commit unit in `batch` mode. |
-| `--transaction-mode` | `batch` | Balanced safety/perf; per-batch retries. |
+| `--engine` | `mssql-python` | Native bulk insert (`bulkcopy`) for faster imports. |
+| `--batch-size` | `1000` | Rows per insert / commit unit. |
+| `--transaction-mode` | `rowgroup` | Row group boundary safety with independent retries. |
 | `--worker-count` | `1` | |
 | `--cci` | enabled | CCI on per-worker staging tables (multi-worker only). |
 | `--retries` | `3` | |
-| `--packet-size` | `16383` | Shared with export; see above. |
+| `--packet-size` | `4096` | Shared with export; see above. |
 
-Most defaults are engine-independent; `--batch-size` is **engine-aware** (it
-differs for `mssql-python`). An explicit value always overrides the default.
-
-## Why engine-specific defaults are being considered
-
-A single global default cannot be right for every engine, because the engines
-have materially different mechanics (see [engines](engines.md)). The clearest
-example:
-
-- The `mssql-python` import engine uses `bulkcopy`. In `batch` transaction mode,
-  **each `--batch-size` chunk closes a SQL Server columnstore rowgroup**.
-- With the global default `--batch-size 1000`, importing into a columnstore index
-  via `mssql-python` produces columnstore rowgroups of only 1000 rows — far below
-  the ideal (up to 1,048,576), crippling compression and scan performance.
-- The same `--batch-size 1000` is perfectly reasonable for `pyodbc`/`duckdb`,
-  whose `executemany` inserts trickle through the delta store and are compacted by
-  the tuple mover regardless.
-
-So the *correct* default for `--batch-size` depends on the chosen engine. Rather
-than forcing every user to know this, PyButt can apply an engine-aware default
-when the user has not explicitly set the option.
-
-## Mechanism (engine-aware defaults)
-
-> Status: implemented. See `pybutt/core/config.py`.
-
-- Options that benefit from engine-specific defaults use a sentinel (`None`)
-  default, meaning "user did not specify" — the same pattern `--fetch-size`
-  already uses.
-- A central `ENGINE_DEFAULTS` registry maps `tunable -> {engine: value}`, holding
-  only the values that *diverge* from the generic fallback.
-- `resolve_engine_default(tunable, engine, value, fallback)` applies the rule:
-  explicit `value` wins, else an engine-specific override, else the `fallback`
-  (generic default supplied by the caller).
-- Resolution happens in the `Importer`/`Exporter` constructors so the **Python
-  API** gets the same behaviour as the CLI.
-- Engines with no specific override fall back to the generic default.
-
-The export side is wired through the same resolver (via `--fetch-size`) with no
-overrides registered yet, so adding an export engine default later is a one-line
-registry entry.
-
-## Engine-specific default values
-
-### Import `--batch-size`
-| Engine | Default | Rationale |
+### Combine
+| Option | Default | Notes |
 |---|---|---|
-| `pyodbc` | `1000` | `executemany` trickle insert; small batches are fine and keep locks short. |
-| `duckdb` | `1000` | Same insert path as pyodbc. |
-| `mssql-python` | `1048576` | Each `bulkcopy` batch closes a columnstore rowgroup, so the default produces one full, compressed rowgroup (SQL Server's max). |
+| `--rowgroup-size` | `1048576` | For file combines. |
+| `--retries` | `3` | |
+| `--packet-size` | `4096` | For table combines. |
 
-### Export defaults
-No engine-specific export defaults are registered yet. The framework is wired
-through `--fetch-size`, so when a divergent value is identified it can be added
-as a single `ENGINE_DEFAULTS["fetch_size"]` entry. Note `--fetch-size` is already
-ignored by the `duckdb` engine, so any override would target `pyodbc`/
-`mssql-python`.
+### Memory tuning (shared across export and import)
+| Option | Default | Notes |
+|---|---|---|
+| `--mem-heartbeat` | `30.0` | Log RSS + system memory every N seconds. 0 to disable. |
+| `--mem-threshold` | `85.0` | System memory % at which workers are throttled. 0 to disable. |
+| `--mem-sleep` | `5.0` | Seconds to sleep per throttle check. |
+| `--mem-max-wait` | `300.0` | Max seconds to wait during throttling. |
+| `--mem-cooldown` | `30.0` | Seconds after a throttle event before re-checking. |
+
+### Connection / security (shared across all commands)
+| Option | Default | Notes |
+|---|---|---|
+| `--driver` | `ODBC Driver 18 for SQL Server` | |
+| `--schema` | `dbo` | |
+| `--trusted-connection` | `False` | |
+| `--trust-cert` | `False` | |
+| `--encrypt` | `True` | |
+
+All defaults are defined as named constants in `pybutt/core/config.py`.
 
 ## Change log
 
-- _(unreleased)_ `--packet-size` added (default `16383`, valid 512–32767).
-  Sets the TDS `PacketSize` on all connection paths (pyodbc, mssql-python,
-  DuckDB ODBC scanner). Default is the encrypted-connection maximum.
-- _(unreleased)_ Engine-aware default mechanism implemented. Import
-  `--batch-size` now defaults to `1048576` for the `mssql-python` engine
-  (unchanged `1000` elsewhere). Export framework wired via `--fetch-size` with
-  no overrides registered.
+- _(v2.0.0)_ Export `--engine` default changed from `duckdb` to `pyodbc`.
+- _(v2.0.0)_ Import `--engine` default changed from `pyodbc` to `mssql-python`.
+- _(v2.0.0)_ Import `--transaction-mode` default changed from `batch` to
+  `rowgroup`.
+- _(v2.0.0)_ `--packet-size` default changed from `16383` to `4096`.
+- _(v2.0.0)_ `TransactionMode.ROW` removed; only `batch`, `rowgroup`, and
+  `file` remain.
+- _(v2.0.0)_ Engine-aware default mechanism (`ENGINE_DEFAULTS`,
+  `resolve_engine_default`) removed. All defaults are now flat constants.
+- _(v2.0.0)_ `--rowgroups-per-file` removed from export.
+- _(v2.0.0)_ `--delete-files` removed from import and combine.
+- _(v2.0.0)_ Import and combine now take `manifest_path` as a positional
+  argument instead of `--input-path` + `--manifest-filename`.
+- _(v2.0.0)_ Memory tuning options added (`--mem-heartbeat`, `--mem-threshold`,
+  `--mem-sleep`, `--mem-max-wait`, `--mem-cooldown`).
+- _(v2.0.0)_ `--verbose` short flag changed from `-v` to `-V`; `--version`
+  uses `-v`.
+- _(v2.0.0)_ Help flag `-?` added alongside `--help`.
+- _(v2.0.0)_ `merge` command renamed to `combine`; `merger.py` → `combiner.py`,
+  `TableMerger` → `TableCombine`.
+- _(v2.0.0)_ `rewrite` command and related code removed.
 - _(unreleased)_ Documentation introduced (the `docs/` folder).

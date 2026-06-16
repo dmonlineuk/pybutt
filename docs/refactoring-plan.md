@@ -1,5 +1,19 @@
 # PyButt v2 Refactoring Plan
 
+> **Status: Completed.** All phases have been implemented. During
+> implementation the following naming changes were made relative to the
+> original plan below:
+>
+> - `merge` terminology → `combine` throughout (command, functions, classes)
+> - `merger.py` → `combiner.py`, `TableMerger` → `TableCombine`
+> - `merge_parquet_files()` → `combine_parquet_files()`
+> - `files/merge.py` → `files/combine.py`
+> - `default_temp_manifest_filename()` → `default_import_manifest_filename()`
+> - CLI command files use `_command` suffix (e.g. `export_command.py`) instead
+>   of the plan's `export.py` / `import_cmd.py`
+> - Deprecated `rewrite` code has been fully removed
+> - `SqlServerIOBase` and default constants excluded from public `__all__`
+
 ## Approach
 
 After reviewing the full codebase and dependency graph, the recommended approach
