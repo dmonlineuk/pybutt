@@ -1,6 +1,5 @@
 import getpass
-import tomllib
-from pathlib import Path
+from importlib.metadata import PackageNotFoundError, version
 
 import typer
 
@@ -25,8 +24,10 @@ based on manifest definitions.
 
 
 def _get_project_version() -> str:
-    p = Path(__file__).resolve().parents[2] / "pyproject.toml"
-    return tomllib.loads(p.read_text(encoding="utf-8"))["project"]["version"]
+    try:
+        return version("pybutt")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def _version_callback(ctx, param, value: bool):
