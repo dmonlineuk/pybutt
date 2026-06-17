@@ -22,6 +22,8 @@ dev = [
     "ruff",
     "isort",
     "pytest",
+    "build",
+    "twine",
 ]
 
 [project.scripts]
